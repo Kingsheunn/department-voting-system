@@ -1,47 +1,74 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFirebaseAuthService } from "./firebase-auth";
+import { createLazyFirebaseAuthService } from "./lazy-firebase-auth";
+
+describe("createLazyFirebaseAuthService", () => {
+  it("loads Firebase Auth only when custom-token sign-in is requested", async () => {
+    const signInWithCustomToken = vi.fn().mockResolvedValue(undefined);
+    const load = vi.fn().mockResolvedValue({ signInWithCustomToken });
+    const service = createLazyFirebaseAuthService(load);
+
+    expect(load).not.toHaveBeenCalled();
+
+    await service.signInWithCustomToken("firebase-custom-token");
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(signInWithCustomToken).toHaveBeenCalledWith("firebase-custom-token");
+  });
+
+  it("reuses the loaded Firebase Auth service", async () => {
+    const signInWithCustomToken = vi.fn().mockResolvedValue(undefined);
+    const load = vi.fn().mockResolvedValue({ signInWithCustomToken });
+    const service = createLazyFirebaseAuthService(load);
+
+    await service.signInWithCustomToken("first");
+    await service.signInWithCustomToken("second");
+
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("createFirebaseAuthService", () => {
-  it("uses in-memory persistence before custom-token sign-in", async () => {
+  it("initializes Auth with in-memory persistence before custom-token sign-in", async () => {
     const auth = {} as never;
     const resolveAuth = vi.fn().mockReturnValue(auth);
     const connectEmulator = vi.fn();
-    const useInMemoryPersistence = vi.fn().mockResolvedValue(undefined);
     const signIn = vi.fn().mockResolvedValue(undefined);
     const service = createFirebaseAuthService(
       { apiKey: "public", authDomain: "example.test", projectId: "vote", appId: "web" },
       undefined,
-      { resolveAuth, connectEmulator, useInMemoryPersistence, signIn },
+      { resolveAuth, connectEmulator, signIn },
     );
 
     await service.signInWithCustomToken("firebase-custom-token");
 
-    expect(useInMemoryPersistence).toHaveBeenCalledWith(auth);
+    expect(resolveAuth).toHaveBeenCalledWith(
+      { apiKey: "public", authDomain: "example.test", projectId: "vote", appId: "web" },
+      "in-memory",
+    );
     expect(signIn).toHaveBeenCalledWith(auth, "firebase-custom-token");
-    expect(useInMemoryPersistence.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(resolveAuth.mock.invocationCallOrder[0]).toBeLessThan(
       signIn.mock.invocationCallOrder[0],
     );
   });
 
-  it("connects the loopback Auth emulator before persistence and sign-in", async () => {
+  it("connects the loopback Auth emulator before sign-in", async () => {
     const auth = {} as never;
     const resolveAuth = vi.fn().mockReturnValue(auth);
     const connectEmulator = vi.fn();
-    const useInMemoryPersistence = vi.fn().mockResolvedValue(undefined);
     const signIn = vi.fn().mockResolvedValue(undefined);
     const service = createFirebaseAuthService(
       { apiKey: "public", authDomain: "localhost", projectId: "demo-vote", appId: "web" },
       "http://127.0.0.1:9099",
-      { resolveAuth, connectEmulator, useInMemoryPersistence, signIn },
+      { resolveAuth, connectEmulator, signIn },
     );
 
     await service.signInWithCustomToken("firebase-custom-token");
 
     expect(connectEmulator).toHaveBeenCalledWith(auth, "http://127.0.0.1:9099/");
-    expect(useInMemoryPersistence).toHaveBeenCalledWith(auth);
     expect(connectEmulator.mock.invocationCallOrder[0]).toBeLessThan(
-      useInMemoryPersistence.mock.invocationCallOrder[0],
+      signIn.mock.invocationCallOrder[0],
     );
   });
 
@@ -58,7 +85,6 @@ describe("createFirebaseAuthService", () => {
       {
         resolveAuth,
         connectEmulator: vi.fn(),
-        useInMemoryPersistence: vi.fn(),
         signIn: vi.fn(),
       },
     );
@@ -79,7 +105,6 @@ describe("createFirebaseAuthService", () => {
       {
         resolveAuth: vi.fn().mockReturnValue(auth),
         connectEmulator,
-        useInMemoryPersistence: vi.fn(),
         signIn,
       },
     );

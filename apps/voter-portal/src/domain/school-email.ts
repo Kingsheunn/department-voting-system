@@ -1,4 +1,4 @@
-export type SchoolEmailValidation =
+type SchoolEmailValidation =
   | { ok: true; email: string }
   | { ok: false; code: "required" | "invalid-format" | "wrong-domain" };
 

@@ -1,9 +1,8 @@
 import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import {
   connectAuthEmulator,
-  getAuth,
+  initializeAuth,
   inMemoryPersistence,
-  setPersistence,
   signInWithCustomToken as firebaseSignInWithCustomToken,
   type Auth,
 } from "firebase/auth";
@@ -15,19 +14,20 @@ export type FirebaseAuthService = {
 const requiredConfig = ["apiKey", "authDomain", "projectId", "appId"] as const;
 
 type FirebaseAuthDependencies = {
-  resolveAuth(config: FirebaseOptions): Auth;
+  resolveAuth(config: FirebaseOptions, persistence: "in-memory"): Auth;
   connectEmulator(auth: Auth, url: string): void;
-  useInMemoryPersistence(auth: Auth): Promise<void>;
   signIn(auth: Auth, customToken: string): Promise<unknown>;
 };
 
 const browserDependencies: FirebaseAuthDependencies = {
-  resolveAuth: (config) => {
+  resolveAuth: (config, persistence) => {
     const app = getApps().length > 0 ? getApp() : initializeApp(config);
-    return getAuth(app);
+    return initializeAuth(app, {
+      persistence: persistence === "in-memory" ? inMemoryPersistence : undefined,
+      popupRedirectResolver: undefined,
+    });
   },
   connectEmulator: (auth, url) => connectAuthEmulator(auth, url),
-  useInMemoryPersistence: (auth) => setPersistence(auth, inMemoryPersistence),
   signIn: (auth, customToken) => firebaseSignInWithCustomToken(auth, customToken),
 };
 
@@ -70,13 +70,12 @@ export const createFirebaseAuthService = (
         const approvedEmulatorUrl = emulatorUrl
           ? validateEmulatorUrl(emulatorUrl)
           : undefined;
-        const resolvedAuth = dependencies.resolveAuth(config);
+        const resolvedAuth = dependencies.resolveAuth(config, "in-memory");
         if (approvedEmulatorUrl) {
           dependencies.connectEmulator(resolvedAuth, approvedEmulatorUrl);
         }
         auth = resolvedAuth;
       }
-      await dependencies.useInMemoryPersistence(auth);
       await dependencies.signIn(auth, customToken);
     },
   };
