@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { readRuntimeConfig } from "../src/config.js";
+
+const validEnvironment = {
+  DOJAH_APP_ID: "public-app-id",
+  DOJAH_BASE_URL: "https://sandbox.dojah.io",
+  DOJAH_PRIVATE_KEY: "test-only-private-key",
+  NEXT_PUBLIC_DOJAH_WIDGET_ID: "public-widget-id",
+  STORE_DRIVER: "memory",
+  PORT: "8080",
+};
+
+test("reads explicit runtime configuration without exposing secret values", () => {
+  const config = readRuntimeConfig(validEnvironment);
+
+  assert.equal(config.port, 8080);
+  assert.equal(config.storeDriver, "memory");
+  assert.equal(config.dojah.widgetId, "public-widget-id");
+  assert.equal(config.dojah.environment, "sandbox");
+  assert.equal(config.dojah.privateKey, "test-only-private-key");
+  assert.equal(config.dojah.contractConfirmed, false);
+  assert.deepEqual(config.dojah.allowedDocumentTypes, []);
+  assert.equal(config.accountProvisioningEnabled, false);
+  assert.equal(config.firebase.required, false);
+});
+
+test("reads an explicitly confirmed DoJah verification contract", () => {
+  const config = readRuntimeConfig({
+    ...validEnvironment,
+    DOJAH_VERIFICATION_CONTRACT_CONFIRMED: "true",
+    DOJAH_ALLOWED_DOCUMENT_TYPES: "Student ID,National ID",
+  });
+
+  assert.equal(config.dojah.contractConfirmed, true);
+  assert.deepEqual(config.dojah.allowedDocumentTypes, ["Student ID", "National ID"]);
+});
+
+test("allows sandbox provisioning only through the Firebase Auth Emulator", () => {
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        ACCOUNT_PROVISIONING_ENABLED: "true",
+        FIREBASE_PROJECT_ID: "demo-voting",
+      }),
+    /auth emulator/i,
+  );
+
+  const config = readRuntimeConfig({
+    ...validEnvironment,
+    ACCOUNT_PROVISIONING_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "demo-voting",
+    FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+  });
+  assert.equal(config.accountProvisioningEnabled, true);
+  assert.equal(config.firebase.required, true);
+  assert.equal(config.firebase.projectId, "demo-voting");
+});
+
+test("requires production DoJah, Firestore, and ingress limiting for production provisioning", () => {
+  const production = {
+    ...validEnvironment,
+    NODE_ENV: "production",
+    STORE_DRIVER: "firestore",
+    DOJAH_BASE_URL: "https://api.dojah.io",
+    ACCOUNT_PROVISIONING_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "department-voting",
+    PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+  };
+
+  assert.equal(readRuntimeConfig(production).accountProvisioningEnabled, true);
+  assert.throws(
+    () => readRuntimeConfig({ ...production, DOJAH_BASE_URL: "https://sandbox.dojah.io" }),
+    /production dojah/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...production, STORE_DRIVER: "memory" }),
+    /memory store|firestore/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...production,
+        PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "false",
+      }),
+    /ingress rate limit/i,
+  );
+});
+
+test("refuses incomplete or unsafe runtime configuration", () => {
+  assert.throws(() => readRuntimeConfig({}), /configuration is missing/i);
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, PORT: "not-a-port" }),
+    /port/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        NODE_ENV: "production",
+        PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+      }),
+    /memory store/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        DOJAH_VERIFICATION_CONTRACT_CONFIRMED: "true",
+      }),
+    /document types/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, ACCOUNT_PROVISIONING_ENABLED: "yes" }),
+    /true or false/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, NODE_ENV: "prod" }),
+    /node_env/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, STORE_DRIVER: "firestore" }),
+    /firebase_project_id/i,
+  );
+});

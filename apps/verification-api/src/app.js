@@ -1,0 +1,295 @@
+import {
+  buildDojahLaunchUrl,
+  createAttemptMaterial,
+  createFirebaseUid,
+  evaluateDojahVerification,
+  hashClaimToken,
+  isTerminalStatus,
+  normalizeSchoolEmail,
+  verifyClaimToken,
+  verifyDojahSignature,
+} from "./domain.js";
+
+const JSON_LIMIT = 16 * 1024;
+const WEBHOOK_LIMIT = 1024 * 1024;
+const ATTEMPT_TTL_MS = 30 * 60 * 1000;
+const RETENTION_MS = 24 * 60 * 60 * 1000;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function readBody(request, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    const cleanup = () => {
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("error", onError);
+    };
+    const onData = (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        cleanup();
+        request.resume();
+        reject(new HttpError(413, "Request body is too large"));
+        return;
+      }
+      chunks.push(chunk);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve(Buffer.concat(chunks));
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    request.on("data", onData);
+    request.on("end", onEnd);
+    request.on("error", onError);
+  });
+}
+
+function parseJson(rawBody) {
+  try {
+    return JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    throw new HttpError(400, "Request body must be valid JSON");
+  }
+}
+
+function sendJson(response, status, body) {
+  response.statusCode = status;
+  response.setHeader("cache-control", "no-store");
+  response.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+  response.setHeader("referrer-policy", "no-referrer");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("x-frame-options", "DENY");
+  if (status === 204) return response.end();
+  response.setHeader("content-type", "application/json; charset=utf-8");
+  response.end(JSON.stringify(body));
+}
+
+function bearerToken(request) {
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+    throw new HttpError(401, "Unauthorized");
+  }
+  return authorization.slice(7);
+}
+
+async function authorizedAttempt(request, store, id, now) {
+  const attempt = await store.getAttempt(id);
+  const token = bearerToken(request);
+  if (!attempt || !verifyClaimToken(token, attempt.claimTokenHash)) {
+    throw new HttpError(401, "Unauthorized");
+  }
+  const expiresAt = Date.parse(attempt.expiresAt);
+  if (!Number.isFinite(expiresAt) || now().getTime() >= expiresAt) {
+    throw new HttpError(410, "Verification attempt expired");
+  }
+  return attempt;
+}
+
+function nextAction(status) {
+  if (status === "approved") return "create_account";
+  if (status === "pending_review") return "wait_for_review";
+  if (["rejected", "abandoned", "expired"].includes(status)) return "restart_verification";
+  return "complete_verification";
+}
+
+function createFixedWindowLimiter({ maxAttempts, windowMs, now }) {
+  const counts = new Map();
+  let windowEndsAt = 0;
+
+  return function allow(key) {
+    const currentTime = now().getTime();
+    if (currentTime >= windowEndsAt) {
+      counts.clear();
+      windowEndsAt = currentTime + windowMs;
+    }
+    const count = counts.get(key) ?? 0;
+    if (count >= maxAttempts) return false;
+    counts.set(key, count + 1);
+    return true;
+  };
+}
+
+export function createApiHandler({
+  store,
+  dojahResolver,
+  firebaseAuth,
+  publicDojahConfig,
+  webhookSecret,
+  now = () => new Date(),
+  verificationPolicy = {},
+  accountProvisioningEnabled = false,
+  attemptRateLimit,
+  providerEnvironment,
+}) {
+  if (
+    !store ||
+    !dojahResolver ||
+    (accountProvisioningEnabled && !firebaseAuth) ||
+    !publicDojahConfig?.widgetId ||
+    !webhookSecret ||
+    !["sandbox", "production"].includes(providerEnvironment)
+  ) {
+    throw new Error("Verification API dependencies are incomplete");
+  }
+  const rateLimit = {
+    maxAttempts: 5,
+    windowMs: 60_000,
+    ...(attemptRateLimit ?? {}),
+  };
+  if (
+    !Number.isInteger(rateLimit.maxAttempts) ||
+    rateLimit.maxAttempts < 1 ||
+    !Number.isInteger(rateLimit.windowMs) ||
+    rateLimit.windowMs < 1
+  ) {
+    throw new Error("Attempt rate-limit configuration is invalid");
+  }
+  const allowAttempt = createFixedWindowLimiter({ ...rateLimit, now });
+  const attemptPolicy = {
+    contractConfirmed: verificationPolicy.contractConfirmed === true,
+    allowedDocumentTypes: Array.isArray(verificationPolicy.allowedDocumentTypes)
+      ? [...verificationPolicy.allowedDocumentTypes]
+      : [],
+    providerEnvironment,
+  };
+
+  return async function handleRequest(request, response) {
+    try {
+      const url = new URL(request.url, "http://localhost");
+
+      if (request.method === "POST" && url.pathname === "/v1/verification-attempts") {
+        if (!allowAttempt(request.socket.remoteAddress ?? "unknown")) {
+          throw new HttpError(429, "Too many verification attempts");
+        }
+        const body = parseJson(await readBody(request, JSON_LIMIT));
+        let email;
+        try {
+          email = normalizeSchoolEmail(body?.email);
+        } catch {
+          throw new HttpError(400, "A valid school email is required");
+        }
+        const material = createAttemptMaterial();
+        const createdAt = now();
+        const timestamp = createdAt.toISOString();
+        const expiresAt = new Date(createdAt.getTime() + ATTEMPT_TTL_MS).toISOString();
+        const deleteAfter = new Date(createdAt.getTime() + RETENTION_MS);
+        await store.createAttempt({
+          id: material.attemptId,
+          email,
+          referenceId: material.referenceId,
+          claimTokenHash: hashClaimToken(material.claimToken),
+          status: "created",
+          statusReason: "attempt_created",
+          accountStatus: "not_created",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          expiresAt,
+          deleteAfter,
+          verificationPolicy: {
+            ...attemptPolicy,
+            allowedDocumentTypes: [...attemptPolicy.allowedDocumentTypes],
+          },
+        });
+        return sendJson(response, 201, {
+          attemptId: material.attemptId,
+          claimToken: material.claimToken,
+          status: "created",
+          expiresAt,
+          verificationUrl: buildDojahLaunchUrl({
+            widgetId: publicDojahConfig.widgetId,
+            referenceId: material.referenceId,
+          }),
+        });
+      }
+
+      const attemptRoute = url.pathname.match(
+        /^\/v1\/verification-attempts\/(va_[A-Za-z0-9_-]+)(?:\/(exchange))?$/,
+      );
+      if (attemptRoute && request.method === "GET" && !attemptRoute[2]) {
+        const attempt = await authorizedAttempt(request, store, attemptRoute[1], now);
+        return sendJson(response, 200, {
+          status: attempt.status,
+          nextAction: nextAction(attempt.status),
+        });
+      }
+
+      if (attemptRoute?.[2] === "exchange" && request.method === "POST") {
+        const attempt = await authorizedAttempt(request, store, attemptRoute[1], now);
+        if (attempt.verificationPolicy?.providerEnvironment !== providerEnvironment) {
+          throw new HttpError(409, "Verification environment changed");
+        }
+        if (attempt.status !== "approved") {
+          throw new HttpError(409, "Verification is not approved");
+        }
+        if (!accountProvisioningEnabled) {
+          throw new HttpError(503, "Account provisioning is disabled");
+        }
+        const uid = await store.reserveFirebaseUid(attempt.id, createFirebaseUid());
+        if (!uid) {
+          throw new HttpError(409, "Account provisioning is already in progress");
+        }
+        let firebaseCustomToken;
+        try {
+          firebaseCustomToken = await firebaseAuth.provisionAndMint({
+            uid,
+            email: attempt.email,
+          });
+          await store.markAccountReady(attempt.id);
+        } catch (error) {
+          await store.releaseAccountProvisioning(attempt.id);
+          throw error;
+        }
+        return sendJson(response, 200, { firebaseCustomToken });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/webhooks/dojah") {
+        const rawBody = await readBody(request, WEBHOOK_LIMIT);
+        const signature = request.headers["x-dojah-signature"];
+        if (!verifyDojahSignature(rawBody, signature, webhookSecret)) {
+          throw new HttpError(401, "Invalid webhook signature");
+        }
+
+        const event = parseJson(rawBody);
+        if (typeof event?.reference_id !== "string" || event.reference_id.length < 11) {
+          throw new HttpError(400, "Webhook reference is invalid");
+        }
+        const attempt = await store.getAttemptByReferenceId(event.reference_id);
+        if (!attempt) return sendJson(response, 204);
+        if (isTerminalStatus(attempt.status)) return sendJson(response, 204);
+        if (attempt.verificationPolicy?.providerEnvironment !== providerEnvironment) {
+          return sendJson(response, 204);
+        }
+
+        const authoritativeResult = await dojahResolver(event.reference_id);
+        const decision = evaluateDojahVerification(
+          authoritativeResult,
+          attempt,
+          attempt.verificationPolicy,
+        );
+        await store.applyProviderResult(
+          attempt.id,
+          decision.status,
+          decision.reason,
+        );
+        return sendJson(response, 204);
+      }
+
+      return sendJson(response, 404, { error: "Not found" });
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 500;
+      const message = error instanceof HttpError ? error.message : "Internal server error";
+      return sendJson(response, status, { error: message });
+    }
+  };
+}

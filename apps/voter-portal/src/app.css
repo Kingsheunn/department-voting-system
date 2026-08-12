@@ -1,0 +1,194 @@
+@import "@fontsource/roboto/latin-400.css";
+@import "@fontsource/roboto/latin-500.css";
+@import "@fontsource/roboto/latin-700.css";
+
+:root {
+  --color-canvas: #fbf7ed;
+  --color-ink: #073f2b;
+  --color-body: #242722;
+  --color-success: #2f8750;
+  --color-current: #ff6f61;
+  --color-muted: #777a74;
+  --color-muted-surface: #ebe2cd;
+  --color-info: #075dab;
+  --color-privacy-surface: #e8efd6;
+  --color-divider: #dfd5bd;
+  --color-error: #8d2d27;
+  color: var(--color-body);
+  background: var(--color-canvas);
+  font-family: "Roboto", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* { box-sizing: border-box; }
+html { min-width: 320px; background: var(--color-canvas); }
+body { min-width: 320px; min-height: 100vh; min-height: 100dvh; margin: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; opacity: 0.58; }
+
+.portal-shell {
+  display: grid;
+  width: min(100% - 40px, 1080px);
+  min-height: 100vh;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 48px 0 32px;
+  align-content: center;
+  gap: 40px;
+}
+
+.portal-intro,
+.portal-workflow { min-width: 0; }
+.overline,
+.step-label {
+  margin: 0 0 14px;
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+h1,
+h2,
+p { text-wrap: pretty; }
+h1,
+h2 { color: var(--color-ink); text-wrap: balance; }
+h1 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(42px, 11vw, 68px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 0.99;
+}
+h2 { margin: 0; font-size: clamp(26px, 7vw, 34px); line-height: 1.08; }
+.intro-copy { max-width: 32rem; margin: 20px 0 28px; font-size: 18px; line-height: 1.55; }
+
+.privacy-note {
+  display: grid;
+  max-width: 31rem;
+  padding: 18px 20px;
+  border-left: 5px solid var(--color-success);
+  color: var(--color-ink);
+  background: var(--color-privacy-surface);
+  border-radius: 0 12px 12px 0;
+  gap: 5px;
+}
+.privacy-note strong { font-size: 18px; }
+.privacy-note span { color: var(--color-body); line-height: 1.45; }
+
+.portal-workflow { display: grid; align-content: center; gap: 22px; }
+.email-step > p:not(.step-label),
+.success-state > p:not(.step-label) { margin: 12px 0 24px; font-size: 17px; line-height: 1.5; }
+form { display: grid; gap: 10px; margin-top: 26px; }
+label { color: var(--color-ink); font-size: 15px; font-weight: 700; }
+input {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 15px;
+  border: 2px solid var(--color-divider);
+  border-radius: 12px;
+  color: var(--color-body);
+  background: #fffdf8;
+  font-size: 16px;
+}
+input[aria-invalid="true"] { border-color: var(--color-error); }
+.field-help,
+.field-error { margin: 0; font-size: 14px; line-height: 1.4; }
+.field-help { color: var(--color-muted); }
+.field-error,
+.service-error { color: var(--color-error); font-weight: 500; }
+.service-error { margin: 0; line-height: 1.45; }
+
+.primary-action,
+.secondary-action {
+  width: 100%;
+  min-height: 56px;
+  padding: 0 20px;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  transition-property: background-color, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+.primary-action { margin-top: 10px; border: 0; color: #fff; background: var(--color-ink); }
+.secondary-action { border: 2px solid var(--color-ink); color: var(--color-ink); background: transparent; }
+.primary-action:not(:disabled):active,
+.secondary-action:not(:disabled):active { scale: 0.96; }
+.primary-action:not(:disabled):hover { background: #052f21; }
+.secondary-action:not(:disabled):hover { color: #fff; background: var(--color-ink); }
+button:focus-visible,
+input:focus-visible { outline: 3px solid var(--color-info); outline-offset: 3px; }
+
+.account-boundary { margin: 20px 0 0; color: var(--color-muted); font-size: 14px; text-align: center; }
+.verification-steps { display: grid; margin: 0; padding: 0; list-style: none; gap: 0; }
+.verification-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  min-height: 92px;
+  align-items: start;
+}
+.verification-step:not(:last-child)::after {
+  position: absolute;
+  top: 44px;
+  bottom: 5px;
+  left: 19px;
+  border-left: 3px dashed var(--color-divider);
+  content: "";
+}
+.step-marker {
+  z-index: 1;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-ink);
+  background: var(--color-muted-surface);
+  font-size: 18px;
+  font-weight: 700;
+}
+.verification-step strong { display: block; margin: 5px 0 8px; color: var(--color-ink); font-size: 19px; }
+.verification-step small { color: var(--color-muted); font-size: 16px; font-weight: 500; }
+.verification-step[data-state="complete"] .step-marker { color: #fff; background: var(--color-ink); }
+.verification-step[data-state="complete"] small { color: var(--color-success); }
+.verification-step[data-state="current"] .step-marker { color: #fff; background: var(--color-current); }
+.verification-step[data-state="current"] small { color: var(--color-current); }
+
+.status-message {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border-left: 4px solid var(--color-current);
+  color: var(--color-ink);
+  background: #fffdf8;
+  font-weight: 700;
+}
+.actions { display: grid; gap: 12px; }
+.actions .primary-action { margin-top: 0; }
+.belenios-note {
+  padding-top: 20px;
+  border-top: 2px solid var(--color-divider);
+  color: var(--color-ink);
+  font-size: 14px;
+  text-align: center;
+}
+.success-state { padding: 16px 0; }
+
+@media (min-width: 800px) {
+  .portal-shell {
+    grid-template-columns: minmax(0, 0.94fr) minmax(360px, 0.8fr);
+    gap: clamp(56px, 8vw, 112px);
+    padding: 64px 0;
+  }
+  .portal-workflow { padding-left: clamp(40px, 5vw, 72px); border-left: 2px solid var(--color-divider); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
