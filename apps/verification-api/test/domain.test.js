@@ -45,7 +45,7 @@ function completedStudentCardUpload(overrides = {}) {
   return {
     reference_id: "VR_expected-reference",
     verification_status: "Completed",
-    verification_mode: "",
+    verification_mode: "LIVENESS",
     status: true,
     data: {
       email: { status: true, data: { email } },
@@ -227,6 +227,39 @@ test("does not accept an unconfirmed school email in a student-card flow", () =>
     evaluateDojahVerification(result, attempt, verificationPolicy),
     { status: "pending_review", reason: "required_checks_missing" },
   );
+});
+
+test("does not queue an ineligible student-card result for manual review", () => {
+  const attempt = { email, referenceId: "VR_expected-reference" };
+  const cases = [
+    {
+      result: completedStudentCardUpload({
+        data: {
+          ...completedStudentCardUpload().data,
+          email: {
+            status: true,
+            data: { email: "other@students.unilorin.edu.ng" },
+          },
+        },
+      }),
+      expected: { status: "rejected", reason: "checks_failed" },
+    },
+    {
+      result: completedStudentCardUpload({ status: false }),
+      expected: { status: "rejected", reason: "checks_failed" },
+    },
+    {
+      result: completedStudentCardUpload({ verification_mode: "VIDEO" }),
+      expected: { status: "pending_review", reason: "liveness_mode_missing" },
+    },
+  ];
+
+  for (const { result, expected } of cases) {
+    assert.deepEqual(
+      evaluateDojahVerification(result, attempt, verificationPolicy),
+      expected,
+    );
+  }
 });
 
 test("maps non-completed provider states without granting access", () => {

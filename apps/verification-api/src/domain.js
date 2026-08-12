@@ -163,6 +163,12 @@ export function evaluateDojahVerification(
   if (emailCheck?.status !== true || selfieCheck?.status !== true) {
     return { status: "pending_review", reason: "required_checks_missing" };
   }
+  if (providerResult.verification_mode !== "LIVENESS") {
+    return { status: "pending_review", reason: "liveness_mode_missing" };
+  }
+  if (providerResult.status !== true || verifiedEmail !== attempt.email) {
+    return { status: "rejected", reason: "checks_failed" };
+  }
   if (
     !idCheck &&
     Array.isArray(providerResult.data?.additional_document) &&
@@ -172,9 +178,6 @@ export function evaluateDojahVerification(
       status: "pending_review",
       reason: "student_id_manual_review_required",
     };
-  }
-  if (providerResult.verification_mode !== "LIVENESS") {
-    return { status: "pending_review", reason: "liveness_mode_missing" };
   }
 
   const requiredFieldsPresent =
@@ -192,9 +195,5 @@ export function evaluateDojahVerification(
   ) {
     return { status: "pending_review", reason: "document_type_not_allowed" };
   }
-  if (providerResult.status !== true || verifiedEmail !== attempt.email) {
-    return { status: "rejected", reason: "checks_failed" };
-  }
-
   return { status: "approved", reason: "checks_passed" };
 }
