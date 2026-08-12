@@ -149,9 +149,6 @@ export function evaluateDojahVerification(
   if (contractConfirmed !== true) {
     return { status: "pending_review", reason: "verification_contract_unconfirmed" };
   }
-  if (providerResult.verification_mode !== "LIVENESS") {
-    return { status: "pending_review", reason: "liveness_mode_missing" };
-  }
 
   const emailCheck = providerResult.data?.email;
   const idCheck = providerResult.data?.id;
@@ -163,11 +160,26 @@ export function evaluateDojahVerification(
     return { status: "pending_review", reason: "required_checks_missing" };
   }
 
+  if (emailCheck?.status !== true || selfieCheck?.status !== true) {
+    return { status: "pending_review", reason: "required_checks_missing" };
+  }
+  if (
+    !idCheck &&
+    Array.isArray(providerResult.data?.additional_document) &&
+    providerResult.data.additional_document.length > 0
+  ) {
+    return {
+      status: "pending_review",
+      reason: "student_id_manual_review_required",
+    };
+  }
+  if (providerResult.verification_mode !== "LIVENESS") {
+    return { status: "pending_review", reason: "liveness_mode_missing" };
+  }
+
   const requiredFieldsPresent =
-    emailCheck?.status === true &&
     idCheck?.status === true &&
     nonEmptyString(idCheck?.data?.id_data?.document_number) &&
-    selfieCheck?.status === true &&
     nonEmptyString(selfieCheck?.data?.selfie_url);
 
   if (!requiredFieldsPresent) {

@@ -41,6 +41,26 @@ function completedVerification(overrides = {}) {
   };
 }
 
+function completedStudentCardUpload(overrides = {}) {
+  return {
+    reference_id: "VR_expected-reference",
+    verification_status: "Completed",
+    verification_mode: "",
+    status: true,
+    data: {
+      email: { status: true, data: { email } },
+      additional_document: [
+        {
+          document_type: "image",
+          document_url: "https://provider.invalid/student-card",
+        },
+      ],
+      selfie: { status: true, data: { selfie_url: "https://provider.invalid/selfie" } },
+    },
+    ...overrides,
+  };
+}
+
 test("normalizes an exact University of Ilorin student email", () => {
   assert.equal(
     normalizeSchoolEmail("  Student.One@STUDENTS.UNILORIN.EDU.NG  "),
@@ -178,6 +198,34 @@ test("requires the confirmed liveness and document-type contract", () => {
   assert.deepEqual(
     evaluateDojahVerification(wrongDocumentType, attempt, verificationPolicy),
     { status: "pending_review", reason: "document_type_not_allowed" },
+  );
+});
+
+test("routes a custom student-card upload to manual review without approving it", () => {
+  const attempt = { email, referenceId: "VR_expected-reference" };
+
+  assert.deepEqual(
+    evaluateDojahVerification(
+      completedStudentCardUpload(),
+      attempt,
+      verificationPolicy,
+    ),
+    { status: "pending_review", reason: "student_id_manual_review_required" },
+  );
+});
+
+test("does not accept an unconfirmed school email in a student-card flow", () => {
+  const attempt = { email, referenceId: "VR_expected-reference" };
+  const result = completedStudentCardUpload({
+    data: {
+      ...completedStudentCardUpload().data,
+      email: { status: false, data: { email } },
+    },
+  });
+
+  assert.deepEqual(
+    evaluateDojahVerification(result, attempt, verificationPolicy),
+    { status: "pending_review", reason: "required_checks_missing" },
   );
 });
 

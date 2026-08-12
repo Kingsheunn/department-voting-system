@@ -26,6 +26,14 @@ export function createDojahResolver({ baseUrl, appId, privateKey, fetchImpl = fe
       signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) throw new Error("DoJah verification lookup failed");
-    return response.json();
+    const payload = await response.json();
+    if (
+      !payload?.entity ||
+      typeof payload.entity !== "object" ||
+      Array.isArray(payload.entity)
+    ) {
+      throw new Error("DoJah verification response is invalid");
+    }
+    return payload.entity;
   };
 }

@@ -17,11 +17,29 @@ test("resolves verification details through the authenticated HTTPS DoJah API", 
       assert.equal(options.headers.AppId, "public-app-id");
       assert.equal(options.headers.Authorization, "test-only-private-key");
       assert.equal(options.redirect, "error");
-      return { ok: true, json: async () => expected };
+      return { ok: true, json: async () => ({ entity: expected }) };
     },
   });
 
   assert.deepEqual(await resolver("VR_reference-value"), expected);
+});
+
+test("rejects a verification-details response without a valid entity envelope", async () => {
+  const invalidPayloads = [{}, { entity: null }, { entity: [] }];
+
+  for (const payload of invalidPayloads) {
+    const resolver = createDojahResolver({
+      baseUrl: "https://sandbox.dojah.io",
+      appId: "public-app-id",
+      privateKey: "test-only-private-key",
+      fetchImpl: async () => ({ ok: true, json: async () => payload }),
+    });
+
+    await assert.rejects(
+      () => resolver("VR_reference-value"),
+      /verification response/i,
+    );
+  }
 });
 
 test("rejects a non-HTTPS DoJah API base URL", () => {
