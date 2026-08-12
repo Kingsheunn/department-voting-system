@@ -11,8 +11,9 @@ const config = readRuntimeConfig(process.env);
 let firebaseApp;
 if (config.firebase.required) {
   const { applicationDefault, initializeApp } = await import("firebase-admin/app");
-  const emulatorOnly =
-    config.storeDriver === "memory" && config.firebase.authEmulatorHost;
+  const emulatorOnly = Boolean(
+    config.firebase.authEmulatorHost || config.firebase.firestoreEmulatorHost,
+  );
   firebaseApp = initializeApp({
     projectId: config.firebase.projectId,
     ...(emulatorOnly ? {} : { credential: applicationDefault() }),

@@ -45,7 +45,7 @@ test("allows sandbox provisioning only through the Firebase Auth Emulator", () =
         ACCOUNT_PROVISIONING_ENABLED: "true",
         FIREBASE_PROJECT_ID: "demo-voting",
       }),
-    /auth emulator/i,
+    /firebase_auth_emulator_host|auth emulator/i,
   );
 
   const config = readRuntimeConfig({
@@ -57,6 +57,60 @@ test("allows sandbox provisioning only through the Firebase Auth Emulator", () =
   assert.equal(config.accountProvisioningEnabled, true);
   assert.equal(config.firebase.required, true);
   assert.equal(config.firebase.projectId, "demo-voting");
+});
+
+test("allows sandbox Firestore only through matching local emulators", () => {
+  const sandboxFirestore = {
+    ...validEnvironment,
+    STORE_DRIVER: "firestore",
+    ACCOUNT_PROVISIONING_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "demo-department-voting",
+    FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+  };
+
+  assert.throws(() => readRuntimeConfig(sandboxFirestore), /firestore emulator/i);
+
+  const config = readRuntimeConfig({
+    ...sandboxFirestore,
+    FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+  });
+  assert.equal(config.firebase.projectId, "demo-department-voting");
+  assert.equal(config.firebase.firestoreEmulatorHost, "127.0.0.1:8080");
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...sandboxFirestore,
+        FIREBASE_PROJECT_ID: "real-project-name",
+        FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+      }),
+    /demo project/i,
+  );
+});
+
+test("rejects unsafe emulator hosts and emulator configuration in production", () => {
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        ACCOUNT_PROVISIONING_ENABLED: "true",
+        FIREBASE_PROJECT_ID: "demo-voting",
+        FIREBASE_AUTH_EMULATOR_HOST: "attacker.test:9099",
+      }),
+    /firebase_auth_emulator_host|auth emulator/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        NODE_ENV: "production",
+        STORE_DRIVER: "firestore",
+        DOJAH_BASE_URL: "https://api.dojah.io",
+        FIREBASE_PROJECT_ID: "department-voting",
+        FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+        PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+      }),
+    /emulator.*production|production.*emulator/i,
+  );
 });
 
 test("requires production DoJah, Firestore, and ingress limiting for production provisioning", () => {

@@ -28,6 +28,30 @@ function dojahHostname(baseUrl) {
   return url.hostname;
 }
 
+function emulatorHost(environment, name) {
+  const value = environment[name];
+  if (!value) return undefined;
+  let url;
+  try {
+    url = new URL(`http://${value}`);
+  } catch {
+    throw new Error(`${name} must be a loopback host and port`);
+  }
+  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  if (
+    !loopback ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(`${name} must be a loopback host and port`);
+  }
+  return value;
+}
+
 export function readRuntimeConfig(environment) {
   const port = Number(environment.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -71,12 +95,10 @@ export function readRuntimeConfig(environment) {
     environment,
     "ACCOUNT_PROVISIONING_ENABLED",
   );
-  const authEmulatorHost = environment.FIREBASE_AUTH_EMULATOR_HOST;
-  if (authEmulatorHost?.includes("://")) {
-    throw new Error("FIREBASE_AUTH_EMULATOR_HOST must not include a protocol");
-  }
-  if (nodeEnvironment === "production" && authEmulatorHost) {
-    throw new Error("Firebase Auth Emulator is not permitted in production");
+  const authEmulatorHost = emulatorHost(environment, "FIREBASE_AUTH_EMULATOR_HOST");
+  const firestoreEmulatorHost = emulatorHost(environment, "FIRESTORE_EMULATOR_HOST");
+  if (nodeEnvironment === "production" && (authEmulatorHost || firestoreEmulatorHost)) {
+    throw new Error("Firebase emulators are not permitted in production");
   }
   if (
     nodeEnvironment === "production" &&
@@ -95,6 +117,20 @@ export function readRuntimeConfig(environment) {
   const firebaseProjectId = firebaseRequired
     ? required(environment, "FIREBASE_PROJECT_ID")
     : environment.FIREBASE_PROJECT_ID;
+  if (
+    storeDriver === "firestore" &&
+    dojahHost === "sandbox.dojah.io" &&
+    !firestoreEmulatorHost
+  ) {
+    throw new Error("Sandbox Firestore requires the Firestore Emulator");
+  }
+  if (
+    dojahHost === "sandbox.dojah.io" &&
+    firebaseRequired &&
+    !firebaseProjectId.startsWith("demo-")
+  ) {
+    throw new Error("Sandbox Firebase requires a demo project ID");
+  }
   const privateKey = required(environment, "DOJAH_PRIVATE_KEY");
 
   return {
@@ -105,6 +141,7 @@ export function readRuntimeConfig(environment) {
       required: firebaseRequired,
       projectId: firebaseProjectId,
       authEmulatorHost,
+      firestoreEmulatorHost,
     },
     dojah: {
       appId: required(environment, "DOJAH_APP_ID"),
