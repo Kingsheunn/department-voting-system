@@ -59,6 +59,34 @@ test("allows sandbox provisioning only through the Firebase Auth Emulator", () =
   assert.equal(config.firebase.projectId, "demo-voting");
 });
 
+test("enables manual review independently but only with Firebase Auth and Firestore", () => {
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, MANUAL_REVIEW_ENABLED: "true" }),
+    /firestore/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        STORE_DRIVER: "firestore",
+        MANUAL_REVIEW_ENABLED: "true",
+        FIREBASE_PROJECT_ID: "demo-voting",
+        FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+      }),
+    /auth emulator/i,
+  );
+  const config = readRuntimeConfig({
+    ...validEnvironment,
+    STORE_DRIVER: "firestore",
+    MANUAL_REVIEW_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "demo-voting",
+    FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+    FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+  });
+  assert.equal(config.manualReviewEnabled, true);
+  assert.equal(config.firebase.required, true);
+});
+
 test("allows sandbox Firestore only through matching local emulators", () => {
   const sandboxFirestore = {
     ...validEnvironment,
@@ -177,5 +205,13 @@ test("refuses incomplete or unsafe runtime configuration", () => {
   assert.throws(
     () => readRuntimeConfig({ ...validEnvironment, STORE_DRIVER: "firestore" }),
     /firebase_project_id/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        DOJAH_BASE_URL: "https://sandbox.dojah.io:4443",
+      }),
+    /dojah base url/i,
   );
 });

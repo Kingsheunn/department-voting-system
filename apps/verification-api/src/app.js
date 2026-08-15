@@ -75,12 +75,79 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+function sendImage(response, { contentType, body }) {
+  response.statusCode = 200;
+  response.setHeader("cache-control", "no-store, private");
+  response.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+  response.setHeader("content-type", contentType);
+  response.setHeader("content-length", body.length);
+  response.setHeader("referrer-policy", "no-referrer");
+  response.setHeader("x-content-type-options", "nosniff");
+  response.setHeader("x-frame-options", "DENY");
+  response.end(body);
+}
+
 function bearerToken(request) {
   const authorization = request.headers.authorization;
   if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
     throw new HttpError(401, "Unauthorized");
   }
   return authorization.slice(7);
+}
+
+async function authorizedStaff(request, firebaseAuth) {
+  if (!firebaseAuth?.verifyStaffToken) {
+    throw new HttpError(503, "Staff authentication is unavailable");
+  }
+  try {
+    return await firebaseAuth.verifyStaffToken(bearerToken(request));
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(401, "Unauthorized");
+  }
+}
+
+function reviewDecision(value) {
+  if (value !== "approve" && value !== "reject") {
+    throw new HttpError(400, "Review decision must be approve or reject");
+  }
+  return value;
+}
+
+function staffCanViewReview(staff) {
+  return staff.verificationReviewer === true || staff.verificationAdmin === true;
+}
+
+function maskedEmail(email) {
+  const [local, domain] = email.split("@");
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function isReviewableAttempt(attempt, currentTime) {
+  const expiresAt = Date.parse(attempt.expiresAt);
+  return (
+    Number.isFinite(expiresAt) &&
+    expiresAt > currentTime.getTime() &&
+    attempt.status === "pending_review" &&
+    (attempt.statusReason === "student_id_manual_review_required" ||
+      attempt.reviewStage === "escalated_review")
+  );
+}
+
+function idempotencyKey(request) {
+  const value = request.headers["idempotency-key"];
+  if (typeof value !== "string" || value.length < 1 || value.length > 128) {
+    throw new HttpError(400, "A valid Idempotency-Key header is required");
+  }
+  return value;
+}
+
+function rethrowReviewError(error) {
+  if (error?.code === "NOT_FOUND") throw new HttpError(404, error.message);
+  if (["REVIEW_CONFLICT", "IDEMPOTENCY_CONFLICT"].includes(error?.code)) {
+    throw new HttpError(409, error.message);
+  }
+  throw error;
 }
 
 async function authorizedAttempt(request, store, id, now) {
@@ -129,8 +196,10 @@ export function createApiHandler({
   now = () => new Date(),
   verificationPolicy = {},
   accountProvisioningEnabled = false,
+  manualReviewEnabled = false,
   attemptRateLimit,
   providerEnvironment,
+  evidenceService,
 }) {
   if (
     !store ||
@@ -251,6 +320,83 @@ export function createApiHandler({
           throw error;
         }
         return sendJson(response, 200, { firebaseCustomToken });
+      }
+
+      const reviewRoute = url.pathname.match(
+        /^\/v1\/admin\/verification-reviews\/(va_[A-Za-z0-9_-]+)\/(decisions|resolution)$/,
+      );
+      if (reviewRoute && request.method === "POST") {
+        if (!manualReviewEnabled) throw new HttpError(503, "Manual review is disabled");
+        const staff = await authorizedStaff(request, firebaseAuth);
+        const action = reviewRoute[2];
+        if (action === "decisions") {
+          if (staff.verificationReviewer !== true || staff.verificationAdmin === true) {
+            throw new HttpError(403, "Forbidden");
+          }
+        } else if (staff.verificationAdmin !== true) {
+          throw new HttpError(403, "Forbidden");
+        }
+        const key = idempotencyKey(request);
+        const body = parseJson(await readBody(request, JSON_LIMIT));
+        const input = {
+          id: reviewRoute[1],
+          actorUid: staff.uid,
+          decision: reviewDecision(body?.decision),
+          idempotencyKey: key,
+        };
+        try {
+          const result = action === "decisions"
+            ? await store.recordReviewerDecision(input)
+            : await store.resolveEscalatedReview(input);
+          return sendJson(response, 200, result);
+        } catch (error) {
+          rethrowReviewError(error);
+        }
+      }
+
+      if (url.pathname === "/v1/admin/verification-reviews" && request.method === "GET") {
+        if (!manualReviewEnabled) throw new HttpError(503, "Manual review is disabled");
+        const staff = await authorizedStaff(request, firebaseAuth);
+        if (!staffCanViewReview(staff)) throw new HttpError(403, "Forbidden");
+        const attempts = await store.listReviewableAttempts(20);
+        return sendJson(response, 200, {
+          reviews: attempts.map((attempt) => ({
+            attemptId: attempt.id,
+            maskedEmail: maskedEmail(attempt.email),
+            status: attempt.status,
+            reviewStage: attempt.reviewStage ?? "awaiting_first_review",
+            createdAt: attempt.createdAt,
+          })),
+        });
+      }
+
+      const reviewViewRoute = url.pathname.match(
+        /^\/v1\/admin\/verification-reviews\/(va_[A-Za-z0-9_-]+)(?:\/evidence\/(student-card))?$/,
+      );
+      if (reviewViewRoute && request.method === "GET") {
+        if (!manualReviewEnabled) throw new HttpError(503, "Manual review is disabled");
+        const staff = await authorizedStaff(request, firebaseAuth);
+        if (!staffCanViewReview(staff)) throw new HttpError(403, "Forbidden");
+        if (!evidenceService) throw new HttpError(503, "Review evidence is unavailable");
+        const attempt = await store.getAttempt(reviewViewRoute[1]);
+        if (!attempt) throw new HttpError(404, "Verification attempt not found");
+        if (!isReviewableAttempt(attempt, now())) {
+          throw new HttpError(409, "Verification attempt is not reviewable");
+        }
+        if (reviewViewRoute[2] === "student-card") {
+          return sendImage(
+            response,
+            await evidenceService.fetchStudentCard(attempt.referenceId),
+          );
+        }
+        const metadata = await evidenceService.getReviewMetadata(attempt.referenceId);
+        return sendJson(response, 200, {
+          attemptId: attempt.id,
+          maskedEmail: maskedEmail(attempt.email),
+          status: attempt.status,
+          reviewStage: attempt.reviewStage ?? "awaiting_first_review",
+          ...metadata,
+        });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/webhooks/dojah") {

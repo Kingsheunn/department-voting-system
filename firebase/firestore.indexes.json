@@ -1,5 +1,14 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "verificationAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "reviewQueue", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "verificationAttempts",
@@ -9,6 +18,12 @@
     },
     {
       "collectionGroup": "verificationReferences",
+      "fieldPath": "deleteAfter",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "verificationReviewAudits",
       "fieldPath": "deleteAfter",
       "ttl": true,
       "indexes": []

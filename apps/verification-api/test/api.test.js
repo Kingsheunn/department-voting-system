@@ -63,8 +63,8 @@ function completedResult(referenceId, overrides = {}) {
   return {
     reference_id: referenceId,
     verification_status: "Completed",
-    verification_mode: "LIVENESS",
     status: true,
+    liveness: { passed: true, probability: 90 },
     data: {
       email: { status: true, data: { email: schoolEmail } },
       id: {

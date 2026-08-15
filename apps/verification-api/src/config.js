@@ -22,7 +22,16 @@ function dojahHostname(baseUrl) {
   } catch {
     throw new Error("Runtime DoJah base URL is invalid");
   }
-  if (url.protocol !== "https:" || !DOJAH_HOSTS.has(url.hostname)) {
+  if (
+    url.protocol !== "https:" ||
+    !DOJAH_HOSTS.has(url.hostname) ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
     throw new Error("Runtime DoJah base URL is invalid");
   }
   return url.hostname;
@@ -95,6 +104,10 @@ export function readRuntimeConfig(environment) {
     environment,
     "ACCOUNT_PROVISIONING_ENABLED",
   );
+  const manualReviewEnabled = booleanFlag(environment, "MANUAL_REVIEW_ENABLED");
+  if (manualReviewEnabled && storeDriver !== "firestore") {
+    throw new Error("Manual review requires Firestore");
+  }
   const authEmulatorHost = emulatorHost(environment, "FIREBASE_AUTH_EMULATOR_HOST");
   const firestoreEmulatorHost = emulatorHost(environment, "FIRESTORE_EMULATOR_HOST");
   if (nodeEnvironment === "production" && (authEmulatorHost || firestoreEmulatorHost)) {
@@ -107,13 +120,18 @@ export function readRuntimeConfig(environment) {
   ) {
     throw new Error("Production provisioning requires the production DoJah host");
   }
-  if (accountProvisioningEnabled && dojahHost === "sandbox.dojah.io" && !authEmulatorHost) {
-    throw new Error("Sandbox provisioning requires the Firebase Auth Emulator");
+  if (
+    (accountProvisioningEnabled || manualReviewEnabled) &&
+    dojahHost === "sandbox.dojah.io" &&
+    !authEmulatorHost
+  ) {
+    throw new Error("Sandbox identity operations require the Firebase Auth Emulator");
   }
   if (accountProvisioningEnabled && dojahHost === "api.dojah.io" && storeDriver !== "firestore") {
     throw new Error("Production provisioning requires Firestore");
   }
-  const firebaseRequired = storeDriver === "firestore" || accountProvisioningEnabled;
+  const firebaseRequired =
+    storeDriver === "firestore" || accountProvisioningEnabled || manualReviewEnabled;
   const firebaseProjectId = firebaseRequired
     ? required(environment, "FIREBASE_PROJECT_ID")
     : environment.FIREBASE_PROJECT_ID;
@@ -132,11 +150,22 @@ export function readRuntimeConfig(environment) {
     throw new Error("Sandbox Firebase requires a demo project ID");
   }
   const privateKey = required(environment, "DOJAH_PRIVATE_KEY");
+  const imageHosts = (environment.DOJAH_IMAGE_HOSTS ?? "images.dojah.io")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    imageHosts.length === 0 ||
+    imageHosts.some((host) => !/^[a-z0-9.-]+$/.test(host))
+  ) {
+    throw new Error("DOJAH_IMAGE_HOSTS must contain exact hostnames");
+  }
 
   return {
     port,
     storeDriver,
     accountProvisioningEnabled,
+    manualReviewEnabled,
     firebase: {
       required: firebaseRequired,
       projectId: firebaseProjectId,
@@ -148,6 +177,7 @@ export function readRuntimeConfig(environment) {
       baseUrl,
       environment: dojahHost === "api.dojah.io" ? "production" : "sandbox",
       privateKey,
+      imageHosts,
       webhookSecret: environment.DOJAH_WEBHOOK_SECRET || privateKey,
       widgetId: required(
         environment,

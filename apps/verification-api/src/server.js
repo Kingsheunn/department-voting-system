@@ -2,7 +2,8 @@ import { createServer } from "node:http";
 
 import { createApiHandler } from "./app.js";
 import { readRuntimeConfig } from "./config.js";
-import { createDojahResolver } from "./dojah.js";
+import { createDojahDetailsResolver, createDojahResolver } from "./dojah.js";
+import { createDojahEvidenceService } from "./evidence.js";
 import { createFirebaseAuthAdapter } from "./firebase-auth.js";
 import { createFirestoreStore } from "./firestore-store.js";
 import { createMemoryStore } from "./memory-store.js";
@@ -27,17 +28,29 @@ if (config.storeDriver === "firestore") {
 }
 
 let firebaseAuth;
-if (config.accountProvisioningEnabled) {
+if (config.firebase.required) {
   const { getAuth } = await import("firebase-admin/auth");
   firebaseAuth = createFirebaseAuthAdapter(getAuth(firebaseApp));
 }
 
+const dojahResolver = createDojahResolver({
+  baseUrl: config.dojah.baseUrl,
+  appId: config.dojah.appId,
+  privateKey: config.dojah.privateKey,
+  imageHosts: config.dojah.imageHosts,
+});
+const dojahDetailsResolver = createDojahDetailsResolver({
+  baseUrl: config.dojah.baseUrl,
+  appId: config.dojah.appId,
+  privateKey: config.dojah.privateKey,
+});
+
 const handler = createApiHandler({
   store,
-  dojahResolver: createDojahResolver({
-    baseUrl: config.dojah.baseUrl,
-    appId: config.dojah.appId,
-    privateKey: config.dojah.privateKey,
+  dojahResolver,
+  evidenceService: createDojahEvidenceService({
+    resolveVerification: dojahDetailsResolver,
+    evidenceHosts: config.dojah.imageHosts,
   }),
   firebaseAuth,
   publicDojahConfig: { widgetId: config.dojah.widgetId },
@@ -47,6 +60,7 @@ const handler = createApiHandler({
     allowedDocumentTypes: config.dojah.allowedDocumentTypes,
   },
   accountProvisioningEnabled: config.accountProvisioningEnabled,
+  manualReviewEnabled: config.manualReviewEnabled,
   providerEnvironment: config.dojah.environment,
 });
 

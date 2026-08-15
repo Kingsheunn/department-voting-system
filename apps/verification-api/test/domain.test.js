@@ -22,8 +22,8 @@ function completedVerification(overrides = {}) {
   return {
     reference_id: "VR_expected-reference",
     verification_status: "Completed",
-    verification_mode: "LIVENESS",
     status: true,
+    liveness: { passed: true, probability: 91.25 },
     data: {
       email: { status: true, data: { email } },
       id: {
@@ -45,8 +45,8 @@ function completedStudentCardUpload(overrides = {}) {
   return {
     reference_id: "VR_expected-reference",
     verification_status: "Completed",
-    verification_mode: "LIVENESS",
     status: true,
+    liveness: { passed: true, probability: 91.25 },
     data: {
       email: { status: true, data: { email } },
       additional_document: [
@@ -163,7 +163,7 @@ test("fails closed when provider fields are missing, unknown, or mismatched", ()
   }
 });
 
-test("requires the confirmed liveness and document-type contract", () => {
+test("requires the confirmed normalized liveness and document-type contract", () => {
   const attempt = { email, referenceId: "VR_expected-reference" };
   const wrongDocumentType = completedVerification({
     data: {
@@ -189,11 +189,19 @@ test("requires the confirmed liveness and document-type contract", () => {
   );
   assert.deepEqual(
     evaluateDojahVerification(
-      completedVerification({ verification_mode: "VIDEO" }),
+      completedVerification({ liveness: { passed: false, probability: 49 } }),
       attempt,
       verificationPolicy,
     ),
-    { status: "pending_review", reason: "liveness_mode_missing" },
+    { status: "rejected", reason: "liveness_check_failed" },
+  );
+  assert.deepEqual(
+    evaluateDojahVerification(
+      completedVerification({ liveness: undefined }),
+      attempt,
+      verificationPolicy,
+    ),
+    { status: "pending_review", reason: "liveness_result_invalid" },
   );
   assert.deepEqual(
     evaluateDojahVerification(wrongDocumentType, attempt, verificationPolicy),
@@ -249,8 +257,10 @@ test("does not queue an ineligible student-card result for manual review", () =>
       expected: { status: "rejected", reason: "checks_failed" },
     },
     {
-      result: completedStudentCardUpload({ verification_mode: "VIDEO" }),
-      expected: { status: "pending_review", reason: "liveness_mode_missing" },
+      result: completedStudentCardUpload({
+        liveness: { passed: false, probability: 49 },
+      }),
+      expected: { status: "rejected", reason: "liveness_check_failed" },
     },
   ];
 

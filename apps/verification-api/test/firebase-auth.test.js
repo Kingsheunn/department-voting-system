@@ -164,3 +164,26 @@ test("rejects an email collision owned by another Firebase UID", async () => {
     /identity conflict/i,
   );
 });
+
+test("verifies staff ID tokens with revocation checks and maps review claims", async () => {
+  const calls = [];
+  const adapter = createFirebaseAuthAdapter({
+    async verifyIdToken(token, checkRevoked) {
+      calls.push([token, checkRevoked]);
+      return {
+        uid: "staff-uid",
+        verificationReviewer: true,
+        verificationAdmin: false,
+      };
+    },
+  });
+
+  const staff = await adapter.verifyStaffToken("staff-token");
+
+  assert.deepEqual(calls, [["staff-token", true]]);
+  assert.deepEqual(staff, {
+    uid: "staff-uid",
+    verificationReviewer: true,
+    verificationAdmin: false,
+  });
+});

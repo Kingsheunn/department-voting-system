@@ -1,5 +1,14 @@
 export function createFirebaseAuthAdapter(auth) {
   return {
+    async verifyStaffToken(token) {
+      const decoded = await auth.verifyIdToken(token, true);
+      return {
+        uid: decoded.uid,
+        verificationReviewer: decoded.verificationReviewer === true,
+        verificationAdmin: decoded.verificationAdmin === true,
+      };
+    },
+
     async provisionAndMint({ uid, email }) {
       let user;
       try {

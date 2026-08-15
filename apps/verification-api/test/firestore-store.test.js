@@ -5,6 +5,7 @@ import { createFirestoreStore } from "../src/firestore-store.js";
 
 function createFakeFirestore() {
   const records = new Map();
+  const queries = [];
   const snapshot = (path) => ({
     exists: records.has(path),
     data: () => structuredClone(records.get(path)),
@@ -19,10 +20,51 @@ function createFakeFirestore() {
     },
   });
 
+  const query = (name, filters = [], ordering = null, maximum = Infinity) => ({
+    where(field, operator, value) {
+      return query(name, [...filters, { field, operator, value }], ordering, maximum);
+    },
+    orderBy(field, direction) {
+      return query(name, filters, { field, direction }, maximum);
+    },
+    limit(value) {
+      return query(name, filters, ordering, value);
+    },
+    async get() {
+      queries.push({ name, filters, ordering, maximum });
+      let values = [...records.entries()]
+        .filter(([path]) => path.startsWith(`${name}/`))
+        .map(([path, value]) => ({ path, value }));
+      for (const filter of filters) {
+        values = values.filter(({ value }) => {
+          if (filter.operator === "==") return value[filter.field] === filter.value;
+          if (filter.operator === ">") return value[filter.field] > filter.value;
+          throw new Error(`unsupported operator ${filter.operator}`);
+        });
+      }
+      if (ordering) {
+        values.sort((left, right) => {
+          const result = left.value[ordering.field].localeCompare(right.value[ordering.field]);
+          return ordering.direction === "desc" ? -result : result;
+        });
+      }
+      return {
+        docs: values.slice(0, maximum).map(({ path, value }) => ({
+          id: path.slice(path.indexOf("/") + 1),
+          data: () => structuredClone(value),
+        })),
+      };
+    },
+  });
+
   return {
     records,
+    queries,
     collection(name) {
-      return { doc: (id) => document(`${name}/${id}`) };
+      return {
+        doc: (id) => document(`${name}/${id}`),
+        ...query(name),
+      };
     },
     async runTransaction(operation) {
       return operation({
@@ -89,4 +131,145 @@ test("Firestore adapter preserves terminal status and stable Firebase UID", asyn
   assert.equal(stored.claimTokenHash, null);
   assert.equal(reference.deleteAfter instanceof Date, true);
   assert.equal(reference.deleteAfter.getTime(), deleteAfter.getTime());
+});
+
+test("Firestore adapter atomically records two-person review state and non-PII audits", async () => {
+  const firestore = createFakeFirestore();
+  const store = createFirestoreStore(firestore);
+  await store.createAttempt({
+    id: "va_reviewable",
+    email: "student.one@students.unilorin.edu.ng",
+    referenceId: "VR_reviewable-reference",
+    claimTokenHash: "hashed-only",
+    status: "pending_review",
+    statusReason: "student_id_manual_review_required",
+    accountStatus: "not_created",
+    createdAt: "2026-08-12T10:00:00.000Z",
+    expiresAt: "2099-08-13T10:00:00.000Z",
+    deleteAfter: new Date("2026-08-13T12:00:00.000Z"),
+  });
+
+  const first = await store.recordReviewerDecision({
+    id: "va_reviewable",
+    actorUid: "reviewer-one",
+    decision: "approve",
+    idempotencyKey: "first-key",
+  });
+  const second = await store.recordReviewerDecision({
+    id: "va_reviewable",
+    actorUid: "reviewer-two",
+    decision: "approve",
+    idempotencyKey: "second-key",
+  });
+
+  assert.deepEqual(first, {
+    status: "pending_review",
+    reviewStage: "awaiting_second_review",
+  });
+  assert.deepEqual(second, { status: "approved", reviewStage: "resolved" });
+  const auditJson = JSON.stringify(
+    [...firestore.records.entries()].filter(([path]) =>
+      path.startsWith("verificationReviewAudits/"),
+    ),
+  );
+  assert.equal(auditJson.includes("student.one@"), false);
+  assert.equal(auditJson.includes("reviewer-one"), false);
+  assert.equal(auditJson.includes("first-key"), false);
+  assert.equal(auditJson.includes("http"), false);
+  const audits = [...firestore.records.entries()]
+    .filter(([path]) => path.startsWith("verificationReviewAudits/"))
+    .map(([, value]) => value);
+  assert.equal(audits.length, 2);
+  for (const audit of audits) {
+    assert.equal(audit.deleteAfter instanceof Date, true);
+    assert.equal(
+      audit.deleteAfter.getTime() - Date.parse(audit.createdAt),
+      365 * 24 * 60 * 60 * 1000,
+    );
+  }
+});
+
+test("Firestore adapter preserves review-owned state from a late provider update", async () => {
+  const firestore = createFakeFirestore();
+  const store = createFirestoreStore(firestore);
+  await store.createAttempt({
+    id: "va_reviewable",
+    email: "student.one@students.unilorin.edu.ng",
+    referenceId: "VR_reviewable-reference",
+    claimTokenHash: "hashed-only",
+    status: "pending_review",
+    statusReason: "student_id_manual_review_required",
+    accountStatus: "not_created",
+    createdAt: "2026-08-12T10:00:00.000Z",
+    expiresAt: "2099-08-13T10:00:00.000Z",
+    deleteAfter: new Date("2026-08-13T12:00:00.000Z"),
+  });
+  await store.recordReviewerDecision({
+    id: "va_reviewable",
+    actorUid: "reviewer-one",
+    decision: "reject",
+    idempotencyKey: "first-key",
+  });
+
+  await store.applyProviderResult("va_reviewable", "approved", "late_provider_approval");
+
+  const stored = await store.getAttempt("va_reviewable");
+  assert.equal(stored.status, "pending_review");
+  assert.equal(stored.reviewStage, "awaiting_second_review");
+  assert.equal(stored.statusReason, "student_id_manual_review_required");
+});
+
+test("Firestore filters reviewable unexpired attempts before applying the queue limit", async () => {
+  const firestore = createFakeFirestore();
+  const store = createFirestoreStore(firestore, {
+    now: () => new Date("2026-08-15T12:00:00.000Z"),
+  });
+  for (let index = 0; index < 101; index += 1) {
+    await store.createAttempt({
+      id: `va_generic_${index}`,
+      email: `student.${index}@students.unilorin.edu.ng`,
+      referenceId: `VR_generic_${index}`,
+      status: "pending_review",
+      statusReason: "provider_pending",
+      accountStatus: "not_created",
+      createdAt: `2026-08-12T10:${String(index % 60).padStart(2, "0")}:00.000Z`,
+      expiresAt: "2099-08-13T10:00:00.000Z",
+      deleteAfter: new Date("2099-08-13T12:00:00.000Z"),
+    });
+  }
+  await store.createAttempt({
+    id: "va_reviewable_after_generic",
+    email: "reviewable@students.unilorin.edu.ng",
+    referenceId: "VR_reviewable_after_generic",
+    status: "pending_review",
+    statusReason: "student_id_manual_review_required",
+    accountStatus: "not_created",
+    createdAt: "2026-08-12T12:00:00.000Z",
+    expiresAt: "2099-08-13T10:00:00.000Z",
+    deleteAfter: new Date("2099-08-13T12:00:00.000Z"),
+  });
+  await store.createAttempt({
+    id: "va_expired_reviewable",
+    email: "expired@students.unilorin.edu.ng",
+    referenceId: "VR_expired_reviewable",
+    status: "pending_review",
+    statusReason: "student_id_manual_review_required",
+    accountStatus: "not_created",
+    createdAt: "2026-08-12T09:00:00.000Z",
+    expiresAt: "2026-08-14T10:00:00.000Z",
+    deleteAfter: new Date("2026-08-16T12:00:00.000Z"),
+  });
+
+  const reviews = await store.listReviewableAttempts(20);
+
+  assert.deepEqual(reviews.map((attempt) => attempt.id), ["va_reviewable_after_generic"]);
+  assert.deepEqual(firestore.queries.at(-1), {
+    name: "verificationAttempts",
+    filters: [
+      { field: "reviewQueue", operator: "==", value: true },
+      { field: "expiresAt", operator: ">", value: "2026-08-15T12:00:00.000Z" },
+    ],
+    ordering: { field: "expiresAt", direction: "asc" },
+    maximum: 20,
+  });
 });

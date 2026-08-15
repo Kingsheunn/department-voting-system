@@ -163,8 +163,19 @@ export function evaluateDojahVerification(
   if (emailCheck?.status !== true || selfieCheck?.status !== true) {
     return { status: "pending_review", reason: "required_checks_missing" };
   }
-  if (providerResult.verification_mode !== "LIVENESS") {
-    return { status: "pending_review", reason: "liveness_mode_missing" };
+  const liveness = providerResult.liveness;
+  if (
+    !liveness ||
+    typeof liveness.passed !== "boolean" ||
+    typeof liveness.probability !== "number" ||
+    !Number.isFinite(liveness.probability) ||
+    liveness.probability < 0 ||
+    liveness.probability > 100
+  ) {
+    return { status: "pending_review", reason: "liveness_result_invalid" };
+  }
+  if (liveness.passed !== true || liveness.probability <= 50) {
+    return { status: "rejected", reason: "liveness_check_failed" };
   }
   if (providerResult.status !== true || verifiedEmail !== attempt.email) {
     return { status: "rejected", reason: "checks_failed" };
@@ -182,8 +193,7 @@ export function evaluateDojahVerification(
 
   const requiredFieldsPresent =
     idCheck?.status === true &&
-    nonEmptyString(idCheck?.data?.id_data?.document_number) &&
-    nonEmptyString(selfieCheck?.data?.selfie_url);
+    nonEmptyString(idCheck?.data?.id_data?.document_number);
 
   if (!requiredFieldsPresent) {
     return { status: "pending_review", reason: "required_checks_missing" };

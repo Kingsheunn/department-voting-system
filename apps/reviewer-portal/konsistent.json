@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "service-tests-import-subject",
+      "description": "Each service test imports the corresponding service module.",
+      "severity": "error",
+      "paths": "src/services/{serviceName}.test.ts",
+      "must": {
+        "importFrom": "./${serviceName}"
+      }
+    }
+  ]
+}
