@@ -154,7 +154,7 @@ test("creates an attempt without retaining the raw claim token", async (t) => {
   assert.equal(stored.expiresAt, body.expiresAt);
   assert.equal(
     Date.parse(body.expiresAt) - Date.parse(stored.createdAt),
-    30 * 60 * 1000,
+    24 * 60 * 60 * 1000,
   );
   assert.equal(stored.deleteAfter instanceof Date, true);
   assert.equal(
@@ -168,7 +168,7 @@ test("creates an attempt without retaining the raw claim token", async (t) => {
   });
 });
 
-test("expires claim credentials after thirty minutes", async (t) => {
+test("expires claim credentials after twenty-four hours", async (t) => {
   let currentTime = Date.parse("2026-08-10T12:00:00.000Z");
   const api = await startApi({ now: () => new Date(currentTime) });
   t.after(api.close);

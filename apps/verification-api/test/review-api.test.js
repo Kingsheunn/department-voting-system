@@ -23,7 +23,7 @@ function pendingAttempt(id = "va_reviewable") {
 }
 
 async function startApi(overrides = {}) {
-  const store = createMemoryStore();
+  const store = createMemoryStore({ now: overrides.now });
   const tokens = {
     reviewer1: { uid: "reviewer-one", verificationReviewer: true, verificationAdmin: false },
     reviewer2: { uid: "reviewer-two", verificationReviewer: true, verificationAdmin: false },
@@ -50,6 +50,7 @@ async function startApi(overrides = {}) {
     manualReviewEnabled: true,
     providerEnvironment: "sandbox",
     evidenceService: overrides.evidenceService,
+    now: overrides.now,
   });
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -59,6 +60,22 @@ async function startApi(overrides = {}) {
     origin: `http://127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
+}
+
+async function createPendingReview(api) {
+  const response = await fetch(`${api.origin}/v1/verification-attempts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "student.one@students.unilorin.edu.ng" }),
+  });
+  assert.equal(response.status, 201);
+  const attempt = await response.json();
+  await api.store.applyProviderResult(
+    attempt.attemptId,
+    "pending_review",
+    "student_id_manual_review_required",
+  );
+  return attempt;
 }
 
 test("authorized staff can choose sanitized dashboard metadata or proxied ID evidence", async (t) => {
@@ -135,6 +152,49 @@ test("authorized staff can list only reviewable attempts without full emails", a
       },
     ],
   });
+});
+
+test("manual review remains allowed immediately before the twenty-four-hour deadline", async (t) => {
+  const createdAt = Date.parse("2026-08-12T10:00:00.000Z");
+  let currentTime = createdAt;
+  const api = await startApi({ now: () => new Date(currentTime) });
+  t.after(api.close);
+  const attempt = await createPendingReview(api);
+  currentTime = createdAt + (24 * 60 * 60 * 1000) - 1;
+
+  const response = await post(
+    api,
+    `/v1/admin/verification-reviews/${attempt.attemptId}/decisions`,
+    "reviewer1",
+    "before-review-deadline",
+    "approve",
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(Date.parse(attempt.expiresAt), createdAt + (24 * 60 * 60 * 1000));
+});
+
+test("manual review rejects at and after the twenty-four-hour deadline", async (t) => {
+  const createdAt = Date.parse("2026-08-12T10:00:00.000Z");
+
+  for (const offset of [0, 1]) {
+    let currentTime = createdAt;
+    const api = await startApi({ now: () => new Date(currentTime) });
+    t.after(api.close);
+    const attempt = await createPendingReview(api);
+    currentTime = createdAt + (24 * 60 * 60 * 1000) + offset;
+
+    const response = await post(
+      api,
+      `/v1/admin/verification-reviews/${attempt.attemptId}/decisions`,
+      "reviewer1",
+      `expired-review-${offset}`,
+      "approve",
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal((await api.store.getAttempt(attempt.attemptId)).reviewDecisions, undefined);
+  }
 });
 
 test("expired attempts cannot be listed, viewed, or reviewed", async (t) => {

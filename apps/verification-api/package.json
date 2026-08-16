@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node --env-file=../../.env.local src/server.js",
+    "seed:dummy-reviewer": "node scripts/seed-dummy-reviewer.js",
     "test": "node --test",
     "start": "node src/server.js"
   },

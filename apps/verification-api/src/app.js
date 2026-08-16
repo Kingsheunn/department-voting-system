@@ -12,7 +12,7 @@ import {
 
 const JSON_LIMIT = 16 * 1024;
 const WEBHOOK_LIMIT = 1024 * 1024;
-const ATTEMPT_TTL_MS = 30 * 60 * 1000;
+const ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = 24 * 60 * 60 * 1000;
 
 class HttpError extends Error {
