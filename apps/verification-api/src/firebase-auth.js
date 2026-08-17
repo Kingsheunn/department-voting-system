@@ -9,6 +9,14 @@ export function createFirebaseAuthAdapter(auth) {
       };
     },
 
+    async verifyIdentityToken(token) {
+      const decoded = await auth.verifyIdToken(token, true);
+      return {
+        uid: decoded.uid,
+        identityVerified: decoded.identityVerified === true,
+      };
+    },
+
     async provisionAndMint({ uid, email }) {
       let user;
       try {

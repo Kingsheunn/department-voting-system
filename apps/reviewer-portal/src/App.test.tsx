@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { ElectionApi, ElectionConfiguration } from "./services/election-api";
 import type { ReviewerApi, ReviewDetail } from "./services/reviewer-api";
 import type { StaffAuthService } from "./services/staff-auth";
 
@@ -15,6 +16,21 @@ const detail: ReviewDetail = {
   reviewStage: "awaiting_first_review",
   dashboardUrl: "https://app.dojah.io/review/one",
   studentCardAvailable: true,
+};
+
+const electionConfiguration: ElectionConfiguration = {
+  title: "Department election",
+  publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+  electionUuid: "demo-election",
+  opensAt: "2026-09-01T08:00:00.000Z",
+  closesAt: "2026-09-01T16:00:00.000Z",
+  voterCount: 120,
+  rosterReviewed: true,
+  credentialAuthorityConfirmed: true,
+  trusteesConfirmed: true,
+  published: true,
+  revision: 1,
+  updatedAt: "2026-08-16T10:00:00.000Z",
 };
 
 const createServices = (roles = { reviewer: true, admin: false }) => {
@@ -29,12 +45,28 @@ const createServices = (roles = { reviewer: true, admin: false }) => {
     signIn: vi.fn().mockResolvedValue({ roles, getIdToken: vi.fn().mockResolvedValue("token") }),
     signOut: vi.fn().mockResolvedValue(undefined),
   };
-  return { auth, createApi: vi.fn().mockReturnValue(api), api };
+  const electionApi: ElectionApi = {
+    getConfiguration: vi.fn().mockResolvedValue(electionConfiguration),
+    saveConfiguration: vi.fn().mockResolvedValue({ ...electionConfiguration, revision: 2 }),
+  };
+  return {
+    auth,
+    createApi: vi.fn().mockReturnValue(api),
+    createElectionApi: vi.fn().mockReturnValue(electionApi),
+    api,
+    electionApi,
+  };
 };
 
 const signInAndOpen = async (services: ReturnType<typeof createServices>) => {
   const user = userEvent.setup();
-  render(<App auth={services.auth} createApi={services.createApi} />);
+  render(
+    <App
+      auth={services.auth}
+      createApi={services.createApi}
+      createElectionApi={services.createElectionApi}
+    />,
+  );
   await user.type(screen.getByLabelText("Staff email"), "reviewer@example.test");
   await user.type(screen.getByLabelText("Password"), "password");
   await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -98,5 +130,43 @@ describe("reviewer portal", () => {
 
     await waitFor(() => expect(services.api.resolveReview).toHaveBeenCalledWith("va_one", "approve"));
     expect(services.api.submitDecision).not.toHaveBeenCalled();
+  });
+
+  it("shows election configuration only to administrators", async () => {
+    const admin = createServices({ reviewer: false, admin: true });
+    const user = userEvent.setup();
+    render(
+      <App
+        auth={admin.auth}
+        createApi={admin.createApi}
+        createElectionApi={admin.createElectionApi}
+      />,
+    );
+    await user.type(screen.getByLabelText("Staff email"), "admin@example.test");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("heading", { name: "Election setup" })).toBeVisible();
+    expect(screen.getByLabelText("Election title")).toHaveValue("Department election");
+    await user.clear(screen.getByLabelText("Election title"));
+    await user.type(screen.getByLabelText("Election title"), "Updated election");
+    await user.click(screen.getByRole("button", { name: "Save election setup" }));
+    await waitFor(() => expect(admin.electionApi.saveConfiguration).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedRevision: 1, title: "Updated election" }),
+    ));
+
+    cleanup();
+    const reviewer = createServices({ reviewer: true, admin: false });
+    render(
+      <App
+        auth={reviewer.auth}
+        createApi={reviewer.createApi}
+        createElectionApi={reviewer.createElectionApi}
+      />,
+    );
+    await user.type(screen.getByLabelText("Staff email"), "reviewer@example.test");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(screen.queryByRole("heading", { name: "Election setup" })).not.toBeInTheDocument();
   });
 });

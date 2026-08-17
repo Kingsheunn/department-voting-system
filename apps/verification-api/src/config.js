@@ -105,8 +105,15 @@ export function readRuntimeConfig(environment) {
     "ACCOUNT_PROVISIONING_ENABLED",
   );
   const manualReviewEnabled = booleanFlag(environment, "MANUAL_REVIEW_ENABLED");
+  const electionConfigurationEnabled = booleanFlag(
+    environment,
+    "ELECTION_CONFIGURATION_ENABLED",
+  );
   if (manualReviewEnabled && storeDriver !== "firestore") {
     throw new Error("Manual review requires Firestore");
+  }
+  if (electionConfigurationEnabled && storeDriver !== "firestore") {
+    throw new Error("Election configuration requires Firestore");
   }
   const authEmulatorHost = emulatorHost(environment, "FIREBASE_AUTH_EMULATOR_HOST");
   const firestoreEmulatorHost = emulatorHost(environment, "FIRESTORE_EMULATOR_HOST");
@@ -121,7 +128,7 @@ export function readRuntimeConfig(environment) {
     throw new Error("Production provisioning requires the production DoJah host");
   }
   if (
-    (accountProvisioningEnabled || manualReviewEnabled) &&
+    (accountProvisioningEnabled || manualReviewEnabled || electionConfigurationEnabled) &&
     dojahHost === "sandbox.dojah.io" &&
     !authEmulatorHost
   ) {
@@ -131,7 +138,10 @@ export function readRuntimeConfig(environment) {
     throw new Error("Production provisioning requires Firestore");
   }
   const firebaseRequired =
-    storeDriver === "firestore" || accountProvisioningEnabled || manualReviewEnabled;
+    storeDriver === "firestore" ||
+    accountProvisioningEnabled ||
+    manualReviewEnabled ||
+    electionConfigurationEnabled;
   const firebaseProjectId = firebaseRequired
     ? required(environment, "FIREBASE_PROJECT_ID")
     : environment.FIREBASE_PROJECT_ID;
@@ -166,6 +176,7 @@ export function readRuntimeConfig(environment) {
     storeDriver,
     accountProvisioningEnabled,
     manualReviewEnabled,
+    electionConfigurationEnabled,
     firebase: {
       required: firebaseRequired,
       projectId: firebaseProjectId,

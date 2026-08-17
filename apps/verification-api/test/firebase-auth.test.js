@@ -187,3 +187,18 @@ test("verifies staff ID tokens with revocation checks and maps review claims", a
     verificationAdmin: false,
   });
 });
+
+test("verifies voter identity tokens with revocation checks", async () => {
+  const calls = [];
+  const adapter = createFirebaseAuthAdapter({
+    async verifyIdToken(token, checkRevoked) {
+      calls.push([token, checkRevoked]);
+      return { uid: "voter-uid", identityVerified: true };
+    },
+  });
+
+  const voter = await adapter.verifyIdentityToken("voter-token");
+
+  assert.deepEqual(calls, [["voter-token", true]]);
+  assert.deepEqual(voter, { uid: "voter-uid", identityVerified: true });
+});

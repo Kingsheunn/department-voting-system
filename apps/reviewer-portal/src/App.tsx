@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import ElectionConfigurationPanel from "./ElectionConfigurationPanel";
+import type { ElectionApi } from "./services/election-api";
 import type {
   ReviewDecision,
   ReviewDetail,
@@ -11,6 +13,7 @@ import type { StaffAuthService, StaffSession } from "./services/staff-auth";
 type Props = {
   auth: StaffAuthService;
   createApi(getIdToken: () => Promise<string>): ReviewerApi;
+  createElectionApi(getIdToken: () => Promise<string>): ElectionApi;
 };
 
 const stageLabel = (stage: ReviewSummary["reviewStage"]) => ({
@@ -163,11 +166,13 @@ function Workspace({
   auth,
   session,
   api,
+  electionApi,
   onSignedOut,
 }: {
   auth: StaffAuthService;
   session: StaffSession;
   api: ReviewerApi;
+  electionApi: ElectionApi;
   onSignedOut(): void;
 }) {
   const [reviews, setReviews] = useState<ReviewSummary[]>([]);
@@ -213,6 +218,7 @@ function Workspace({
         <button className="text-action" type="button" onClick={signOut}>Sign out</button>
       </header>
       {error ? <p className="error banner" role="alert">{error}</p> : null}
+      {session.roles.admin ? <ElectionConfigurationPanel api={electionApi} /> : null}
       <div className="workspace" aria-busy={busy}>
         <section className="queue" aria-labelledby="queue-title">
           <h2 id="queue-title">Review queue</h2>
@@ -256,18 +262,23 @@ function Workspace({
   );
 }
 
-export default function App({ auth, createApi }: Props) {
+export default function App({ auth, createApi, createElectionApi }: Props) {
   const [session, setSession] = useState<StaffSession>();
   const api = useMemo(
     () => session ? createApi(session.getIdToken) : undefined,
     [createApi, session],
   );
-  if (!session || !api) return <Login auth={auth} onSignedIn={setSession} />;
+  const electionApi = useMemo(
+    () => session ? createElectionApi(session.getIdToken) : undefined,
+    [createElectionApi, session],
+  );
+  if (!session || !api || !electionApi) return <Login auth={auth} onSignedIn={setSession} />;
   return (
     <Workspace
       auth={auth}
       session={session}
       api={api}
+      electionApi={electionApi}
       onSignedOut={() => setSession(undefined)}
     />
   );

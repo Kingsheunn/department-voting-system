@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import type { ElectionApi } from "./services/election-api";
 import type { FirebaseAuthService } from "./services/firebase-auth";
 import type { RegistrationApi, VerificationAttempt } from "./services/registration-api";
 
@@ -31,9 +32,20 @@ const createServices = (
     exchangeFirebaseToken: vi.fn().mockResolvedValue("firebase-custom-token"),
   };
   const firebaseAuth: FirebaseAuthService = {
-    signInWithCustomToken: vi.fn().mockResolvedValue(undefined),
+    signInWithCustomToken: vi.fn().mockResolvedValue({
+      getIdToken: vi.fn().mockResolvedValue("firebase-id-token"),
+    }),
   };
-  return { registration, firebaseAuth, openVerification: vi.fn() };
+  const election: ElectionApi = {
+    getCurrent: vi.fn().mockResolvedValue({
+      title: "Department election",
+      publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+      electionUuid: "demo-election",
+      opensAt: "2026-09-01T08:00:00.000Z",
+      closesAt: "2026-09-01T16:00:00.000Z",
+    }),
+  };
+  return { registration, firebaseAuth, election, openVerification: vi.fn() };
 };
 
 afterEach(() => {
@@ -139,5 +151,25 @@ describe("voter registration portal", () => {
     );
     expect(await screen.findByRole("heading", { name: "Your account is ready." })).toBeVisible();
     expect(screen.getByText("This tab is authenticated for the current session.")).toBeVisible();
+    expect(services.election.getCurrent).toHaveBeenCalledWith("firebase-id-token");
+    expect(screen.getByRole("link", { name: "Continue to secure ballot" })).toHaveAttribute(
+      "href",
+      "https://vote.belenios.org/v3/elections/demo-election/",
+    );
+  });
+
+  it("does not render a ballot link until an administrator publishes the election", async () => {
+    const services = createServices("approved");
+    services.election.getCurrent = vi.fn().mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<App {...services} />);
+
+    await user.type(screen.getByRole("textbox", { name: "School email address" }), "student@students.unilorin.edu.ng");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Check verification status" }));
+    await user.click(screen.getByRole("button", { name: "Create your voting account" }));
+
+    expect(await screen.findByRole("heading", { name: "Your account is ready." })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Continue to secure ballot" })).not.toBeInTheDocument();
   });
 });

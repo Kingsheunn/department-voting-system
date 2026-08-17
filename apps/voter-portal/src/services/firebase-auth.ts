@@ -8,7 +8,11 @@ import {
 } from "firebase/auth";
 
 export type FirebaseAuthService = {
-  signInWithCustomToken(customToken: string): Promise<void>;
+  signInWithCustomToken(customToken: string): Promise<FirebaseSession>;
+};
+
+export type FirebaseSession = {
+  getIdToken(): Promise<string>;
 };
 
 const requiredConfig = ["apiKey", "authDomain", "projectId", "appId"] as const;
@@ -16,7 +20,9 @@ const requiredConfig = ["apiKey", "authDomain", "projectId", "appId"] as const;
 type FirebaseAuthDependencies = {
   resolveAuth(config: FirebaseOptions, persistence: "in-memory"): Auth;
   connectEmulator(auth: Auth, url: string): void;
-  signIn(auth: Auth, customToken: string): Promise<unknown>;
+  signIn(auth: Auth, customToken: string): Promise<{
+    user: { getIdToken(forceRefresh?: boolean): Promise<string> };
+  }>;
 };
 
 const browserDependencies: FirebaseAuthDependencies = {
@@ -76,7 +82,10 @@ export const createFirebaseAuthService = (
         }
         auth = resolvedAuth;
       }
-      await dependencies.signIn(auth, customToken);
+      const credential = await dependencies.signIn(auth, customToken);
+      return {
+        getIdToken: () => credential.user.getIdToken(true),
+      };
     },
   };
 };

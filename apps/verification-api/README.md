@@ -19,6 +19,7 @@ Required environment variable names:
 - `DOJAH_ALLOWED_DOCUMENT_TYPES` as a comma-separated, exact allowlist
 - `DOJAH_VERIFICATION_CONTRACT_CONFIRMED` (`true` only after a signed sandbox fixture confirms the contract)
 - `ACCOUNT_PROVISIONING_ENABLED` (defaults to `false`)
+- `ELECTION_CONFIGURATION_ENABLED` (defaults to `false`; requires Firestore and Firebase Auth)
 - `FIREBASE_PROJECT_ID` when Firestore or account provisioning is enabled
 - `FIREBASE_AUTH_EMULATOR_HOST` for sandbox account provisioning; omit the protocol
 - `PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED=true` after production ingress limiting is configured
@@ -37,14 +38,15 @@ npm run dev
 npm start
 ```
 
-For local reviewer testing, start the Firebase Auth Emulator and run
-`npm run seed:dummy-reviewer` with `NODE_ENV=development`,
+For local staff testing, start the Firebase Auth Emulator and run
+`npm run seed:dummy-reviewer` and/or `npm run seed:dummy-admin` with `NODE_ENV=development`,
 `FIREBASE_PROJECT_ID=demo-department-voting`, a loopback
 `FIREBASE_AUTH_EMULATOR_HOST`, and a runtime-only
-`DUMMY_REVIEWER_PASSWORD` of at least 12 characters. The seed script creates
-only `dummy.reviewer@local.test` with the reviewer claim; it cannot run against
-a production or non-demo Firebase project and does not grant the administrator
-claim.
+`DUMMY_REVIEWER_PASSWORD` of at least 12 characters. The scripts create separate
+`dummy.reviewer@local.test` and `dummy.admin@local.test` identities with mutually
+exclusive reviewer/administrator claims. They cannot run outside the exact
+development environment, against a non-demo Firebase project, or without a
+loopback Auth Emulator. Do not persist the dummy password in source control.
 
 `npm run dev` explicitly loads the repository-root `.env.local`; `npm start`
 uses only the process environment supplied by the deployment platform. Copy
@@ -56,6 +58,9 @@ uses only the process environment supplied by the deployment platform. Copy
 - `GET /v1/verification-attempts/:id`
 - `POST /v1/verification-attempts/:id/exchange`
 - `POST /v1/webhooks/dojah`
+- `GET /v1/admin/election-configuration` (administrator claim required)
+- `PUT /v1/admin/election-configuration` (administrator claim required)
+- `GET /v1/election/current` (verified voter identity required)
 
 Attempt status and exchange require the claim token returned at creation. The store retains only its SHA-256 hash, and the single-use credential expires after 24 hours. Firebase UID reservations are transactionally keyed by a normalized-email fingerprint so repeat verification for one email cannot create competing accounts. All responses use `Cache-Control: no-store`.
 
@@ -82,3 +87,19 @@ Attempts and reference-index records receive a Firestore-compatible
 field for both collections; writing the field does not activate TTL deletion.
 
 The API does not subscribe to a webhook service name because DoJah's current documentation uses conflicting spellings. Confirm the sandbox dashboard value before registration. A real signed sandbox webhook must become a regression fixture before production approval is enabled.
+
+## Belenios boundary
+
+Election configuration stores only the public Belenios v3 election URL, UUID,
+title, schedule, expected voter count, publication-readiness confirmations, and
+revision metadata. Administrators configure the ballot, voter credentials, and
+trustees in Belenios itself. The API never accepts or stores a Belenios admin
+token, personalized voter link, credential, trustee key, ballot, tracker, or
+participation record. A published link is returned only after a revoked-checked
+Firebase ID token carries the `identityVerified` claim.
+
+Configuration saves use a Firestore transaction and expected revision to avoid
+lost updates. Sanitized configuration audits contain a one-way actor fingerprint
+and receive a `deleteAfter` timestamp 12 months ahead. Deploy the included
+Firestore TTL override for `electionConfigurationAudits`; writing `deleteAfter`
+alone does not enable deletion.

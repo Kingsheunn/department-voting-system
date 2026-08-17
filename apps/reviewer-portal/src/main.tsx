@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import App from "./App";
 import "./app.css";
+import { createElectionApi } from "./services/election-api";
 import { createReviewerApi } from "./services/reviewer-api";
 import { createLazyStaffAuthService } from "./services/lazy-staff-auth";
 
@@ -21,6 +22,10 @@ const auth = createLazyStaffAuthService(async () => {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App auth={auth} createApi={(getIdToken) => createReviewerApi(getIdToken)} />
+    <App
+      auth={auth}
+      createApi={(getIdToken) => createReviewerApi(getIdToken)}
+      createElectionApi={(getIdToken) => createElectionApi(getIdToken)}
+    />
   </StrictMode>,
 );

@@ -87,6 +87,23 @@ test("enables manual review independently but only with Firebase Auth and Firest
   assert.equal(config.firebase.required, true);
 });
 
+test("enables election configuration only with Firebase Auth and Firestore", () => {
+  assert.throws(
+    () => readRuntimeConfig({ ...validEnvironment, ELECTION_CONFIGURATION_ENABLED: "true" }),
+    /firestore/i,
+  );
+  const config = readRuntimeConfig({
+    ...validEnvironment,
+    STORE_DRIVER: "firestore",
+    ELECTION_CONFIGURATION_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "demo-voting",
+    FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+    FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+  });
+  assert.equal(config.electionConfigurationEnabled, true);
+  assert.equal(config.firebase.required, true);
+});
+
 test("allows sandbox Firestore only through matching local emulators", () => {
   const sandboxFirestore = {
     ...validEnvironment,

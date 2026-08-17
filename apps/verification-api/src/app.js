@@ -9,6 +9,10 @@ import {
   verifyClaimToken,
   verifyDojahSignature,
 } from "./domain.js";
+import {
+  publicElectionConfiguration,
+  validateElectionConfigurationInput,
+} from "./election.js";
 
 const JSON_LIMIT = 16 * 1024;
 const WEBHOOK_LIMIT = 1024 * 1024;
@@ -107,6 +111,21 @@ async function authorizedStaff(request, firebaseAuth) {
   }
 }
 
+async function authorizedIdentity(request, firebaseAuth) {
+  if (!firebaseAuth?.verifyIdentityToken) {
+    throw new HttpError(503, "Voter authentication is unavailable");
+  }
+  let identity;
+  try {
+    identity = await firebaseAuth.verifyIdentityToken(bearerToken(request));
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(401, "Unauthorized");
+  }
+  if (identity.identityVerified !== true) throw new HttpError(403, "Forbidden");
+  return identity;
+}
+
 function reviewDecision(value) {
   if (value !== "approve" && value !== "reject") {
     throw new HttpError(400, "Review decision must be approve or reject");
@@ -197,6 +216,7 @@ export function createApiHandler({
   verificationPolicy = {},
   accountProvisioningEnabled = false,
   manualReviewEnabled = false,
+  electionConfigurationEnabled = false,
   attemptRateLimit,
   providerEnvironment,
   evidenceService,
@@ -207,7 +227,12 @@ export function createApiHandler({
     (accountProvisioningEnabled && !firebaseAuth) ||
     !publicDojahConfig?.widgetId ||
     !webhookSecret ||
-    !["sandbox", "production"].includes(providerEnvironment)
+    !["sandbox", "production"].includes(providerEnvironment) ||
+    (electionConfigurationEnabled &&
+      (!firebaseAuth?.verifyStaffToken ||
+        !firebaseAuth?.verifyIdentityToken ||
+        !store.getElectionConfiguration ||
+        !store.saveElectionConfiguration))
   ) {
     throw new Error("Verification API dependencies are incomplete");
   }
@@ -320,6 +345,54 @@ export function createApiHandler({
           throw error;
         }
         return sendJson(response, 200, { firebaseCustomToken });
+      }
+
+      if (url.pathname === "/v1/admin/election-configuration") {
+        if (!electionConfigurationEnabled) {
+          throw new HttpError(503, "Election configuration is disabled");
+        }
+        const staff = await authorizedStaff(request, firebaseAuth);
+        if (staff.verificationAdmin !== true) throw new HttpError(403, "Forbidden");
+
+        if (request.method === "GET") {
+          return sendJson(response, 200, {
+            configuration: await store.getElectionConfiguration(),
+          });
+        }
+        if (request.method === "PUT") {
+          let input;
+          try {
+            input = validateElectionConfigurationInput(
+              parseJson(await readBody(request, JSON_LIMIT)),
+            );
+          } catch {
+            throw new HttpError(400, "Election configuration is invalid");
+          }
+          try {
+            const configuration = await store.saveElectionConfiguration({
+              ...input,
+              actorUid: staff.uid,
+            });
+            return sendJson(response, 200, { configuration });
+          } catch (error) {
+            if (error?.code === "REVISION_CONFLICT") {
+              throw new HttpError(409, "Election configuration changed");
+            }
+            throw error;
+          }
+        }
+      }
+
+      if (url.pathname === "/v1/election/current" && request.method === "GET") {
+        if (!electionConfigurationEnabled) {
+          throw new HttpError(503, "Election configuration is disabled");
+        }
+        await authorizedIdentity(request, firebaseAuth);
+        const configuration = publicElectionConfiguration(
+          await store.getElectionConfiguration(),
+        );
+        if (!configuration) throw new HttpError(404, "Election is not published");
+        return sendJson(response, 200, configuration);
       }
 
       const reviewRoute = url.pathname.match(

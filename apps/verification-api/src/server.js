@@ -61,6 +61,7 @@ const handler = createApiHandler({
   },
   accountProvisioningEnabled: config.accountProvisioningEnabled,
   manualReviewEnabled: config.manualReviewEnabled,
+  electionConfigurationEnabled: config.electionConfigurationEnabled,
   providerEnvironment: config.dojah.environment,
 });
 

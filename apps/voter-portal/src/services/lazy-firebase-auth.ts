@@ -11,7 +11,7 @@ export const createLazyFirebaseAuthService = (
     signInWithCustomToken: async (customToken) => {
       service ??= load();
       const firebaseAuth = await service;
-      await firebaseAuth.signInWithCustomToken(customToken);
+      return firebaseAuth.signInWithCustomToken(customToken);
     },
   };
 };

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   readDummyReviewerConfig,
+  seedDummyAdmin,
   seedDummyReviewer,
 } from "../scripts/dummy-reviewer.js";
 
@@ -150,4 +151,53 @@ test("re-seeding updates the fixed emulator identity", async () => {
       developmentFixture: true,
     },
   ]);
+});
+
+test("creates a separate administrator-only emulator identity", async () => {
+  const calls = [];
+  const auth = {
+    async getUser() {
+      const error = new Error("not found");
+      error.code = "auth/user-not-found";
+      throw error;
+    },
+    async createUser(input) {
+      calls.push(["createUser", input]);
+    },
+    async updateUser() {
+      throw new Error("must not update a missing user");
+    },
+    async setCustomUserClaims(uid, claims) {
+      calls.push(["setCustomUserClaims", uid, claims]);
+    },
+  };
+
+  const result = await seedDummyAdmin(auth, readDummyReviewerConfig(validEnvironment));
+
+  assert.deepEqual(calls, [
+    [
+      "createUser",
+      {
+        uid: "local-dummy-admin",
+        email: "dummy.admin@local.test",
+        password: validPassword,
+        emailVerified: true,
+        disabled: false,
+      },
+    ],
+    [
+      "setCustomUserClaims",
+      "local-dummy-admin",
+      {
+        verificationReviewer: false,
+        verificationAdmin: true,
+        developmentFixture: true,
+      },
+    ],
+  ]);
+  assert.deepEqual(result, {
+    uid: "local-dummy-admin",
+    email: "dummy.admin@local.test",
+  });
+  assert.equal(JSON.stringify(result).includes(validPassword), false);
 });

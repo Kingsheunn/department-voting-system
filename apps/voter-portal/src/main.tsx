@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import "./app.css";
+import { createElectionApi } from "./services/election-api";
 import { createLazyFirebaseAuthService } from "./services/lazy-firebase-auth";
 import { createRegistrationApi } from "./services/registration-api";
 
@@ -32,6 +33,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <App
       registration={createRegistrationApi()}
       firebaseAuth={firebaseAuth}
+      election={createElectionApi()}
       openVerification={openVerification}
     />
   </React.StrictMode>,

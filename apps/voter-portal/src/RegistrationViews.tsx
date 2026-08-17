@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { validateSchoolEmail } from "./domain/school-email";
+import type { PublicElectionConfiguration } from "./services/election-api";
 import type { VerificationStatus } from "./services/registration-api";
 
 export type BusyOperation = "create" | "status" | "account" | null;
@@ -168,12 +169,30 @@ function ProgressStep({
   );
 }
 
-export function SuccessState() {
+export function SuccessState({ election }: { election: PublicElectionConfiguration | null }) {
   return (
     <div className="success-state" role="status">
       <p className="step-label">VERIFICATION COMPLETE</p>
       <h2>Your account is ready.</h2>
       <p>This tab is authenticated for the current session.</p>
+      {election ? (
+        <div className="ballot-handoff">
+          <strong>{election.title}</strong>
+          <span>
+            Opens {new Date(election.opensAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}
+          </span>
+          <a
+            className="primary-action ballot-action"
+            href={election.publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Continue to secure ballot
+          </a>
+        </div>
+      ) : (
+        <p className="election-pending">The ballot link will appear here after the administrator publishes the election.</p>
+      )}
     </div>
   );
 }

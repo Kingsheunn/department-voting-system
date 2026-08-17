@@ -32,6 +32,8 @@ export function createFirestoreStore(firestore, { now = () => new Date() } = {})
   const references = firestore.collection("verificationReferences");
   const firebaseUidsByEmail = firestore.collection("verificationEmailUids");
   const reviewAudits = firestore.collection("verificationReviewAudits");
+  const electionMetadata = firestore.collection("electionMetadata");
+  const electionAudits = firestore.collection("electionConfigurationAudits");
 
   async function recordReview({ id, actorUid, decision, idempotencyKey, action }) {
     const attemptRef = attempts.doc(id);
@@ -128,6 +130,45 @@ export function createFirestoreStore(firestore, { now = () => new Date() } = {})
   }
 
   return {
+    async getElectionConfiguration() {
+      const configuration = dataOrNull(await electionMetadata.doc("current").get());
+      if (!configuration) return null;
+      const { updatedByFingerprint, ...publicConfiguration } = configuration;
+      return publicConfiguration;
+    },
+
+    async saveElectionConfiguration({ configuration, expectedRevision, actorUid }) {
+      const configurationRef = electionMetadata.doc("current");
+      return firestore.runTransaction(async (transaction) => {
+        const currentSnapshot = await transaction.get(configurationRef);
+        const current = dataOrNull(currentSnapshot);
+        const currentRevision = current?.revision ?? 0;
+        if (currentRevision !== expectedRevision) {
+          throw reviewError("REVISION_CONFLICT", "Election configuration changed");
+        }
+        const revision = currentRevision + 1;
+        const updatedAt = now().toISOString();
+        const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+        const actorFingerprint = digest(actorUid);
+        const stored = {
+          ...configuration,
+          revision,
+          updatedAt,
+          updatedByFingerprint: actorFingerprint,
+        };
+        if (currentSnapshot.exists) transaction.update(configurationRef, stored);
+        else transaction.create(configurationRef, stored);
+        transaction.create(electionAudits.doc(`revision-${revision}`), {
+          revision,
+          actorFingerprint,
+          configuration,
+          createdAt: updatedAt,
+          deleteAfter,
+        });
+        return { ...configuration, revision, updatedAt };
+      });
+    },
+
     async createAttempt(attempt) {
       const attemptRef = attempts.doc(attempt.id);
       const referenceRef = references.doc(attempt.referenceId);

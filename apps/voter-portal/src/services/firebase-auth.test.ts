@@ -5,13 +5,14 @@ import { createLazyFirebaseAuthService } from "./lazy-firebase-auth";
 
 describe("createLazyFirebaseAuthService", () => {
   it("loads Firebase Auth only when custom-token sign-in is requested", async () => {
-    const signInWithCustomToken = vi.fn().mockResolvedValue(undefined);
+    const session = { getIdToken: vi.fn().mockResolvedValue("id-token") };
+    const signInWithCustomToken = vi.fn().mockResolvedValue(session);
     const load = vi.fn().mockResolvedValue({ signInWithCustomToken });
     const service = createLazyFirebaseAuthService(load);
 
     expect(load).not.toHaveBeenCalled();
 
-    await service.signInWithCustomToken("firebase-custom-token");
+    await expect(service.signInWithCustomToken("firebase-custom-token")).resolves.toBe(session);
 
     expect(load).toHaveBeenCalledTimes(1);
     expect(signInWithCustomToken).toHaveBeenCalledWith("firebase-custom-token");
@@ -34,14 +35,15 @@ describe("createFirebaseAuthService", () => {
     const auth = {} as never;
     const resolveAuth = vi.fn().mockReturnValue(auth);
     const connectEmulator = vi.fn();
-    const signIn = vi.fn().mockResolvedValue(undefined);
+    const getIdToken = vi.fn().mockResolvedValue("id-token");
+    const signIn = vi.fn().mockResolvedValue({ user: { getIdToken } });
     const service = createFirebaseAuthService(
       { apiKey: "public", authDomain: "example.test", projectId: "vote", appId: "web" },
       undefined,
       { resolveAuth, connectEmulator, signIn },
     );
 
-    await service.signInWithCustomToken("firebase-custom-token");
+    const session = await service.signInWithCustomToken("firebase-custom-token");
 
     expect(resolveAuth).toHaveBeenCalledWith(
       { apiKey: "public", authDomain: "example.test", projectId: "vote", appId: "web" },
@@ -51,13 +53,15 @@ describe("createFirebaseAuthService", () => {
     expect(resolveAuth.mock.invocationCallOrder[0]).toBeLessThan(
       signIn.mock.invocationCallOrder[0],
     );
+    await expect(session.getIdToken()).resolves.toBe("id-token");
+    expect(getIdToken).toHaveBeenCalledWith(true);
   });
 
   it("connects the loopback Auth emulator before sign-in", async () => {
     const auth = {} as never;
     const resolveAuth = vi.fn().mockReturnValue(auth);
     const connectEmulator = vi.fn();
-    const signIn = vi.fn().mockResolvedValue(undefined);
+    const signIn = vi.fn().mockResolvedValue({ user: { getIdToken: vi.fn() } });
     const service = createFirebaseAuthService(
       { apiKey: "public", authDomain: "localhost", projectId: "demo-vote", appId: "web" },
       "http://127.0.0.1:9099",

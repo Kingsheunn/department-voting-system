@@ -273,3 +273,52 @@ test("Firestore filters reviewable unexpired attempts before applying the queue 
     maximum: 20,
   });
 });
+
+test("Firestore atomically revisions election configuration with a sanitized audit", async () => {
+  const firestore = createFakeFirestore();
+  const store = createFirestoreStore(firestore, {
+    now: () => new Date("2026-08-16T10:00:00.000Z"),
+  });
+  const configuration = {
+    title: "Department election",
+    publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+    electionUuid: "demo-election",
+    opensAt: "2026-09-01T08:00:00.000Z",
+    closesAt: "2026-09-01T16:00:00.000Z",
+    voterCount: 120,
+    rosterReviewed: true,
+    credentialAuthorityConfirmed: true,
+    trusteesConfirmed: true,
+    published: true,
+  };
+
+  const saved = await store.saveElectionConfiguration({
+    configuration,
+    expectedRevision: 0,
+    actorUid: "admin-sensitive-uid",
+  });
+
+  assert.equal(saved.revision, 1);
+  assert.deepEqual(await store.getElectionConfiguration(), saved);
+  const stored = firestore.records.get("electionMetadata/current");
+  assert.equal(stored.updatedByFingerprint.length, 64);
+  assert.equal(JSON.stringify(stored).includes("admin-sensitive-uid"), false);
+  const audit = firestore.records.get("electionConfigurationAudits/revision-1");
+  assert.equal(audit.actorFingerprint.length, 64);
+  assert.equal(audit.revision, 1);
+  assert.equal(audit.deleteAfter instanceof Date, true);
+  assert.equal(
+    audit.deleteAfter.getTime() - Date.parse(audit.createdAt),
+    365 * 24 * 60 * 60 * 1000,
+  );
+  assert.equal(JSON.stringify(audit).includes("admin-sensitive-uid"), false);
+
+  await assert.rejects(
+    store.saveElectionConfiguration({
+      configuration: { ...configuration, title: "Stale" },
+      expectedRevision: 0,
+      actorUid: "another-admin",
+    }),
+    (error) => error.code === "REVISION_CONFLICT",
+  );
+});

@@ -27,6 +27,12 @@
       "fieldPath": "deleteAfter",
       "ttl": true,
       "indexes": []
+    },
+    {
+      "collectionGroup": "electionConfigurationAudits",
+      "fieldPath": "deleteAfter",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

@@ -22,6 +22,8 @@ export function createMemoryStore({ now = () => new Date() } = {}) {
   const references = new Map();
   const firebaseUidsByEmail = new Map();
   const reviewAudits = new Map();
+  const electionAudits = new Map();
+  let electionConfiguration;
 
   function digest(value) {
     return createHash("sha256").update(value, "utf8").digest("hex");
@@ -121,6 +123,41 @@ export function createMemoryStore({ now = () => new Date() } = {}) {
   }
 
   return {
+    async getElectionConfiguration() {
+      if (!electionConfiguration) return null;
+      const { updatedByFingerprint, ...configuration } = electionConfiguration;
+      return copy(configuration);
+    },
+
+    async saveElectionConfiguration({ configuration, expectedRevision, actorUid }) {
+      const currentRevision = electionConfiguration?.revision ?? 0;
+      if (currentRevision !== expectedRevision) {
+        throw reviewError("REVISION_CONFLICT", "Election configuration changed");
+      }
+      const revision = currentRevision + 1;
+      const updatedAt = now().toISOString();
+      const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+      const actorFingerprint = digest(actorUid);
+      electionConfiguration = copy({
+        ...configuration,
+        revision,
+        updatedAt,
+        updatedByFingerprint: actorFingerprint,
+      });
+      electionAudits.set(revision, copy({
+        revision,
+        actorFingerprint,
+        configuration,
+        createdAt: updatedAt,
+        deleteAfter,
+      }));
+      return {
+        ...copy(configuration),
+        revision,
+        updatedAt,
+      };
+    },
+
     async createAttempt(attempt) {
       if (attempts.has(attempt.id) || references.has(attempt.referenceId)) {
         throw new Error("Attempt identifier collision");

@@ -2,6 +2,10 @@ const DUMMY_REVIEWER = Object.freeze({
   uid: "local-dummy-reviewer",
   email: "dummy.reviewer@local.test",
 });
+const DUMMY_ADMIN = Object.freeze({
+  uid: "local-dummy-admin",
+  email: "dummy.admin@local.test",
+});
 
 function validateAuthEmulatorHost(value) {
   let url;
@@ -48,27 +52,40 @@ export function readDummyReviewerConfig(environment) {
   };
 }
 
-export async function seedDummyReviewer(auth, config) {
+async function seedDummyStaff(auth, config, identity, claims) {
   const user = {
-    email: config.email,
+    email: identity.email,
     password: config.password,
     emailVerified: true,
     disabled: false,
   };
 
   try {
-    await auth.getUser(config.uid);
-    await auth.updateUser(config.uid, user);
+    await auth.getUser(identity.uid);
+    await auth.updateUser(identity.uid, user);
   } catch (error) {
     if (error?.code !== "auth/user-not-found") throw error;
-    await auth.createUser({ uid: config.uid, ...user });
+    await auth.createUser({ uid: identity.uid, ...user });
   }
 
-  await auth.setCustomUserClaims(config.uid, {
-    verificationReviewer: true,
-    verificationAdmin: false,
+  await auth.setCustomUserClaims(identity.uid, {
+    ...claims,
     developmentFixture: true,
   });
 
-  return { uid: config.uid, email: config.email };
+  return identity;
+}
+
+export function seedDummyReviewer(auth, config) {
+  return seedDummyStaff(auth, config, DUMMY_REVIEWER, {
+    verificationReviewer: true,
+    verificationAdmin: false,
+  });
+}
+
+export function seedDummyAdmin(auth, config) {
+  return seedDummyStaff(auth, config, DUMMY_ADMIN, {
+    verificationReviewer: false,
+    verificationAdmin: true,
+  });
 }

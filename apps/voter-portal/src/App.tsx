@@ -7,6 +7,7 @@ import {
   type BusyOperation,
 } from "./RegistrationViews";
 import type { FirebaseAuthService } from "./services/firebase-auth";
+import type { ElectionApi, PublicElectionConfiguration } from "./services/election-api";
 import type {
   RegistrationApi,
   VerificationAttempt,
@@ -16,13 +17,15 @@ import type {
 type AppProps = {
   registration: RegistrationApi;
   firebaseAuth: FirebaseAuthService;
+  election: ElectionApi;
   openVerification: (url: string) => void;
 };
 
-export default function App({ registration, firebaseAuth, openVerification }: AppProps) {
+export default function App({ registration, firebaseAuth, election, openVerification }: AppProps) {
   const [attempt, setAttempt] = useState<VerificationAttempt | null>(null);
   const [status, setStatus] = useState<VerificationStatus | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  const [currentElection, setCurrentElection] = useState<PublicElectionConfiguration | null>(null);
   const [busy, setBusy] = useState<BusyOperation>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -63,8 +66,13 @@ export default function App({ registration, firebaseAuth, openVerification }: Ap
         attempt.attemptId,
         attempt.claimToken,
       );
-      await firebaseAuth.signInWithCustomToken(token);
+      const session = await firebaseAuth.signInWithCustomToken(token);
       setSignedIn(true);
+      try {
+        setCurrentElection(await election.getCurrent(await session.getIdToken()));
+      } catch {
+        setMessage("Your account is ready, but election details are temporarily unavailable.");
+      }
     } catch {
       setMessage("Your account could not be created. Try again.");
     } finally {
@@ -104,7 +112,7 @@ export default function App({ registration, firebaseAuth, openVerification }: Ap
 
       <section className="portal-workflow" aria-label="Voter registration">
         {signedIn ? (
-          <SuccessState />
+          <SuccessState election={currentElection} />
         ) : attempt && status ? (
           <VerificationState
             status={status}

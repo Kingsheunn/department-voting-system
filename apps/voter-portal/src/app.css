@@ -123,7 +123,8 @@ input[aria-invalid="true"] { border-color: var(--color-error); }
 .primary-action:not(:disabled):hover { background: #052f21; }
 .secondary-action:not(:disabled):hover { color: #fff; background: var(--color-ink); }
 button:focus-visible,
-input:focus-visible { outline: 3px solid var(--color-info); outline-offset: 3px; }
+input:focus-visible,
+a:focus-visible { outline: 3px solid var(--color-info); outline-offset: 3px; }
 
 .account-boundary { margin: 20px 0 0; color: var(--color-muted); font-size: 14px; text-align: center; }
 .verification-steps { display: grid; margin: 0; padding: 0; list-style: none; gap: 0; }
@@ -179,6 +180,11 @@ input:focus-visible { outline: 3px solid var(--color-info); outline-offset: 3px;
   text-align: center;
 }
 .success-state { padding: 16px 0; }
+.ballot-handoff { display: grid; margin-top: 24px; gap: 8px; }
+.ballot-handoff strong { color: var(--color-ink); font-size: 18px; }
+.ballot-handoff span, .election-pending { color: var(--color-muted); line-height: 1.5; }
+.ballot-action { display: grid; margin-top: 10px; place-items: center; color: #fff; background: var(--color-ink); text-align: center; text-decoration: none; }
+.ballot-action:hover { background: #052f21; }
 
 @media (min-width: 800px) {
   .portal-shell {
