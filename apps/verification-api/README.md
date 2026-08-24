@@ -60,6 +60,7 @@ uses only the process environment supplied by the deployment platform. Copy
 - `POST /v1/webhooks/dojah`
 - `GET /v1/admin/election-configuration` (administrator claim required)
 - `PUT /v1/admin/election-configuration` (administrator claim required)
+- `GET /v1/admin/election-readiness` (administrator claim required)
 - `GET /v1/election/current` (verified voter identity required)
 
 Attempt status and exchange require the claim token returned at creation. The store retains only its SHA-256 hash, and the single-use credential expires after 24 hours. Firebase UID reservations are transactionally keyed by a normalized-email fingerprint so repeat verification for one email cannot create competing accounts. All responses use `Cache-Control: no-store`.
@@ -90,13 +91,22 @@ The API does not subscribe to a webhook service name because DoJah's current doc
 
 ## Belenios boundary
 
-Election configuration stores only the public Belenios v3 election URL, UUID,
+Election configuration stores only the public Belenios v3 election URL
+(`https://vote.belenios.org/v3/election#UUID`), UUID,
 title, schedule, expected voter count, publication-readiness confirmations, and
 revision metadata. Administrators configure the ballot, voter credentials, and
 trustees in Belenios itself. The API never accepts or stores a Belenios admin
 token, personalized voter link, credential, trustee key, ballot, tracker, or
 participation record. A published link is returned only after a revoked-checked
 Firebase ID token carries the `identityVerified` claim.
+
+The server performs a bounded, three-second, redirect-refusing read of the
+official Belenios API v6 configuration, election state, and automatic dates.
+Unsupported versions, unknown states, malformed or oversized responses,
+timeouts, and provider failures fail closed. The voter response exposes only
+the sanitized state and dates, and `canVote` is true only while Belenios reports
+`Open`; administrators can request the same transient readiness without storing
+provider responses.
 
 Configuration saves use a Firestore transaction and expected revision to avoid
 lost updates. Sanitized configuration audits contain a one-way actor fingerprint

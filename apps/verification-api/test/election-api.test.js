@@ -8,7 +8,7 @@ import { createMemoryStore } from "../src/memory-store.js";
 const validConfiguration = {
   expectedRevision: 0,
   title: "Computer Science Department Election",
-  publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+  publicUrl: "https://vote.belenios.org/v3/election#demo-election",
   opensAt: "2026-09-01T08:00:00.000Z",
   closesAt: "2026-09-01T16:00:00.000Z",
   voterCount: 120,
@@ -18,7 +18,7 @@ const validConfiguration = {
   published: true,
 };
 
-async function startApi() {
+async function startApi({ state = "Open", readinessError } = {}) {
   const store = createMemoryStore({
     now: () => new Date("2026-08-16T10:00:00.000Z"),
   });
@@ -47,6 +47,17 @@ async function startApi() {
     webhookSecret: "election-test-secret",
     providerEnvironment: "sandbox",
     electionConfigurationEnabled: true,
+    beleniosClient: {
+      async getElectionReadiness() {
+        if (readinessError) throw readinessError;
+        return {
+          state,
+          canVote: state === "Open",
+          opensAt: validConfiguration.opensAt,
+          closesAt: validConfiguration.closesAt,
+        };
+      },
+    },
   });
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -105,7 +116,7 @@ test("rejects unsafe, incomplete, and secret-bearing configuration", async (t) =
   const api = await startApi();
   t.after(api.close);
   const invalidInputs = [
-    { ...validConfiguration, publicUrl: "https://vote.belenios.org/elections/old/" },
+    { ...validConfiguration, publicUrl: "https://vote.belenios.org/v3/elections/old/" },
     { ...validConfiguration, publicUrl: "https://evil.example/v3/elections/demo/" },
     { ...validConfiguration, publicUrl: "https://vote.belenios.org:444/v3/elections/demo/" },
     { ...validConfiguration, closesAt: validConfiguration.opensAt },
@@ -156,10 +167,50 @@ test("returns only published public metadata to an identity-verified voter", asy
     electionUuid: "demo-election",
     opensAt: validConfiguration.opensAt,
     closesAt: validConfiguration.closesAt,
+    state: "Open",
+    canVote: true,
   });
   assert.equal((await fetch(`${api.origin}/v1/election/current`, {
     headers: { authorization: "Bearer unverified" },
   })).status, 403);
+});
+
+test("returns live readiness only to an administrator", async (t) => {
+  const api = await startApi({ state: "Tallied" });
+  t.after(api.close);
+  await save(api, "admin", validConfiguration);
+
+  assert.equal((await fetch(`${api.origin}/v1/admin/election-readiness`, {
+    headers: { authorization: "Bearer reviewer" },
+  })).status, 403);
+  const response = await fetch(`${api.origin}/v1/admin/election-readiness`, {
+    headers: { authorization: "Bearer admin" },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    readiness: {
+      state: "Tallied",
+      canVote: false,
+      opensAt: validConfiguration.opensAt,
+      closesAt: validConfiguration.closesAt,
+    },
+  });
+});
+
+test("fails closed when live Belenios readiness is unavailable", async (t) => {
+  const api = await startApi({ readinessError: new Error("provider failed") });
+  t.after(api.close);
+  await save(api, "admin", validConfiguration);
+
+  const voter = await fetch(`${api.origin}/v1/election/current`, {
+    headers: { authorization: "Bearer verified" },
+  });
+  const admin = await fetch(`${api.origin}/v1/admin/election-readiness`, {
+    headers: { authorization: "Bearer admin" },
+  });
+  assert.equal(voter.status, 503);
+  assert.equal(admin.status, 503);
+  assert.deepEqual(await voter.json(), { error: "Election readiness is unavailable" });
 });
 
 test("does not expose an unpublished election to voters", async (t) => {

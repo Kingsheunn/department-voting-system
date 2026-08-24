@@ -4,7 +4,7 @@ import { createElectionApi } from "./election-api";
 
 const configuration = {
   title: "Department election",
-  publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+  publicUrl: "https://vote.belenios.org/v3/election#demo-election",
   electionUuid: "demo-election",
   opensAt: "2026-09-01T08:00:00.000Z",
   closesAt: "2026-09-01T16:00:00.000Z",
@@ -57,6 +57,30 @@ describe("createElectionApi", () => {
         },
       }),
     );
+  });
+
+  it("loads sanitized live Belenios readiness", async () => {
+    const readiness = {
+      state: "Open",
+      canVote: true,
+      opensAt: configuration.opensAt,
+      closesAt: configuration.closesAt,
+    };
+    const fetchRequest = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ readiness }));
+    const api = createElectionApi(() => Promise.resolve("admin-token"), fetchRequest);
+
+    await expect(api.getReadiness()).resolves.toEqual(readiness);
+    expect(fetchRequest).toHaveBeenCalledWith("/v1/admin/election-readiness", {
+      headers: { Authorization: "Bearer admin-token" },
+    });
+  });
+
+  it("returns no readiness before an election is configured", async () => {
+    const api = createElectionApi(
+      () => Promise.resolve("admin-token"),
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 })),
+    );
+    await expect(api.getReadiness()).resolves.toBeNull();
   });
 
   it("rejects an election URL outside the Belenios v3 service", async () => {

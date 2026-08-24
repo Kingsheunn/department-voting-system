@@ -39,10 +39,12 @@ const createServices = (
   const election: ElectionApi = {
     getCurrent: vi.fn().mockResolvedValue({
       title: "Department election",
-      publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+      publicUrl: "https://vote.belenios.org/v3/election#demo-election",
       electionUuid: "demo-election",
       opensAt: "2026-09-01T08:00:00.000Z",
       closesAt: "2026-09-01T16:00:00.000Z",
+      state: "Open",
+      canVote: true,
     }),
   };
   return { registration, firebaseAuth, election, openVerification: vi.fn() };
@@ -154,8 +156,31 @@ describe("voter registration portal", () => {
     expect(services.election.getCurrent).toHaveBeenCalledWith("firebase-id-token");
     expect(screen.getByRole("link", { name: "Continue to secure ballot" })).toHaveAttribute(
       "href",
-      "https://vote.belenios.org/v3/elections/demo-election/",
+      "https://vote.belenios.org/v3/election#demo-election",
     );
+  });
+
+  it("does not render an active ballot action before Belenios opens the election", async () => {
+    const services = createServices("approved");
+    services.election.getCurrent = vi.fn().mockResolvedValue({
+      title: "Department election",
+      publicUrl: "https://vote.belenios.org/v3/election#demo-election",
+      electionUuid: "demo-election",
+      opensAt: "2026-09-01T08:00:00.000Z",
+      closesAt: "2026-09-01T16:00:00.000Z",
+      state: "Draft",
+      canVote: false,
+    });
+    const user = userEvent.setup();
+    render(<App {...services} />);
+
+    await user.type(screen.getByRole("textbox", { name: "School email address" }), "student@students.unilorin.edu.ng");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Check verification status" }));
+    await user.click(screen.getByRole("button", { name: "Create your voting account" }));
+
+    expect(await screen.findByText("Voting has not opened yet.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Continue to secure ballot" })).not.toBeInTheDocument();
   });
 
   it("does not render a ballot link until an administrator publishes the election", async () => {

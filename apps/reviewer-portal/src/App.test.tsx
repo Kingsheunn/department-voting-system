@@ -20,7 +20,7 @@ const detail: ReviewDetail = {
 
 const electionConfiguration: ElectionConfiguration = {
   title: "Department election",
-  publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+  publicUrl: "https://vote.belenios.org/v3/election#demo-election",
   electionUuid: "demo-election",
   opensAt: "2026-09-01T08:00:00.000Z",
   closesAt: "2026-09-01T16:00:00.000Z",
@@ -47,6 +47,12 @@ const createServices = (roles = { reviewer: true, admin: false }) => {
   };
   const electionApi: ElectionApi = {
     getConfiguration: vi.fn().mockResolvedValue(electionConfiguration),
+    getReadiness: vi.fn().mockResolvedValue({
+      state: "Open",
+      canVote: true,
+      opensAt: electionConfiguration.opensAt,
+      closesAt: electionConfiguration.closesAt,
+    }),
     saveConfiguration: vi.fn().mockResolvedValue({ ...electionConfiguration, revision: 2 }),
   };
   return {
@@ -148,6 +154,7 @@ describe("reviewer portal", () => {
 
     expect(await screen.findByRole("heading", { name: "Election setup" })).toBeVisible();
     expect(screen.getByLabelText("Election title")).toHaveValue("Department election");
+    expect(await screen.findByText("Open — voters can enter the ballot.")).toBeVisible();
     await user.clear(screen.getByLabelText("Election title"));
     await user.type(screen.getByLabelText("Election title"), "Updated election");
     await user.click(screen.getByRole("button", { name: "Save election setup" }));

@@ -281,7 +281,7 @@ test("Firestore atomically revisions election configuration with a sanitized aud
   });
   const configuration = {
     title: "Department election",
-    publicUrl: "https://vote.belenios.org/v3/elections/demo-election/",
+    publicUrl: "https://vote.belenios.org/v3/election#demo-election",
     electionUuid: "demo-election",
     opensAt: "2026-09-01T08:00:00.000Z",
     closesAt: "2026-09-01T16:00:00.000Z",

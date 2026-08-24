@@ -4,6 +4,8 @@ export type PublicElectionConfiguration = {
   electionUuid: string;
   opensAt: string;
   closesAt: string;
+  state: "Draft" | "Open" | "Closed" | "Shuffling" | "EncryptedTally" | "Tallied" | "Archived";
+  canVote: boolean;
 };
 
 export type ElectionApi = {
@@ -19,6 +21,16 @@ const isIsoTimestamp = (value: unknown): value is string =>
   Number.isFinite(Date.parse(value)) &&
   new Date(Date.parse(value)).toISOString() === value;
 
+const ELECTION_STATES = new Set([
+  "Draft",
+  "Open",
+  "Closed",
+  "Shuffling",
+  "EncryptedTally",
+  "Tallied",
+  "Archived",
+]);
+
 const validElection = (value: unknown): value is PublicElectionConfiguration => {
   if (!isRecord(value) || typeof value.title !== "string" || typeof value.electionUuid !== "string") {
     return false;
@@ -26,15 +38,18 @@ const validElection = (value: unknown): value is PublicElectionConfiguration => 
   if (!isIsoTimestamp(value.opensAt) || !isIsoTimestamp(value.closesAt)) return false;
   try {
     const url = new URL(String(value.publicUrl));
-    const match = url.pathname.match(/^\/v3\/elections\/([A-Za-z0-9_-]{6,128})\/$/);
+    const match = url.hash.match(/^#([A-Za-z0-9_-]{6,128})$/);
     return url.protocol === "https:" &&
       url.hostname === "vote.belenios.org" &&
       url.port === "" &&
       url.username === "" &&
       url.password === "" &&
+      url.pathname === "/v3/election" &&
       url.search === "" &&
-      url.hash === "" &&
-      match?.[1] === value.electionUuid;
+      match?.[1] === value.electionUuid &&
+      ELECTION_STATES.has(String(value.state)) &&
+      typeof value.canVote === "boolean" &&
+      value.canVote === (value.state === "Open");
   } catch {
     return false;
   }

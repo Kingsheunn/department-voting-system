@@ -1,9 +1,10 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import type {
   ElectionApi,
   ElectionConfiguration,
   ElectionConfigurationInput,
+  ElectionReadiness,
 } from "./services/election-api";
 
 const LAGOS_OFFSET = "+01:00";
@@ -42,12 +43,38 @@ const formValue = (configuration: ElectionConfiguration): ElectionConfigurationI
   published: configuration.published,
 });
 
+const readinessMessage = (readiness: ElectionReadiness) => ({
+  Draft: "Draft — voting has not opened.",
+  Open: "Open — voters can enter the ballot.",
+  Closed: "Closed — ballots are not being accepted.",
+  Shuffling: "Shuffling — voting is finished.",
+  EncryptedTally: "Tallying — voting is finished.",
+  Tallied: "Tallied — results are available in Belenios.",
+  Archived: "Archived — voting is finished.",
+})[readiness.state];
+
 export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }) {
   const [configuration, setConfiguration] = useState<ElectionConfigurationInput>(blankConfiguration);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [readiness, setReadiness] = useState<ElectionReadiness | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [readinessError, setReadinessError] = useState("");
+
+  const refreshReadiness = useCallback(async () => {
+    setChecking(true);
+    setReadinessError("");
+    try {
+      setReadiness(await api.getReadiness());
+    } catch (cause) {
+      setReadiness(null);
+      setReadinessError(cause instanceof Error ? cause.message : "Live election status is unavailable.");
+    } finally {
+      setChecking(false);
+    }
+  }, [api]);
 
   useEffect(() => {
     let active = true;
@@ -61,8 +88,9 @@ export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }
       .finally(() => {
         if (active) setLoading(false);
       });
+    void refreshReadiness();
     return () => { active = false; };
-  }, [api]);
+  }, [api, refreshReadiness]);
 
   const update = <K extends keyof ElectionConfigurationInput>(
     field: K,
@@ -82,6 +110,7 @@ export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }
       });
       setConfiguration(formValue(saved));
       setMessage("Election setup saved.");
+      await refreshReadiness();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Election setup could not be saved.");
     } finally {
@@ -97,7 +126,16 @@ export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }
         <p>Publish only the public Belenios election link. Private credentials and trustee keys stay in Belenios.</p>
       </div>
       {loading ? <p role="status">Loading election setup...</p> : (
-        <form className="election-form" onSubmit={submit}>
+        <>
+          <div className="live-readiness" aria-live="polite" aria-busy={checking}>
+            <strong>Live Belenios status</strong>
+            <span>{checking ? "Checking live status..." : readiness ? readinessMessage(readiness) : "No live status is available yet."}</span>
+            {readinessError ? <span className="error" role="alert">{readinessError}</span> : null}
+            <button className="secondary" type="button" onClick={() => void refreshReadiness()} disabled={checking}>
+              Refresh live status
+            </button>
+          </div>
+          <form className="election-form" onSubmit={submit}>
           <label htmlFor="election-title">Election title</label>
           <input
             id="election-title"
@@ -114,7 +152,7 @@ export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }
             id="election-url"
             type="url"
             value={configuration.publicUrl}
-            placeholder="https://vote.belenios.org/v3/elections/.../"
+            placeholder="https://vote.belenios.org/v3/election#..."
             required
             onChange={(event) => update("publicUrl", event.target.value)}
           />
@@ -144,7 +182,8 @@ export default function ElectionConfigurationPanel({ api }: { api: ElectionApi }
           {error ? <p className="error" role="alert">{error}</p> : null}
           {message ? <p className="success" role="status">{message}</p> : null}
           <button className="primary" type="submit" disabled={saving}>{saving ? "Saving..." : "Save election setup"}</button>
-        </form>
+          </form>
+        </>
       )}
     </section>
   );

@@ -84,6 +84,9 @@ input[type="radio"] { width: 20px; height: 20px; accent-color: var(--color-ink);
 .election-setup { padding: 28px 0; border-top: 2px solid var(--color-divider); border-bottom: 2px solid var(--color-divider); }
 .section-heading { max-width: 44rem; }
 .section-heading > p:last-child { margin: 12px 0 0; line-height: 1.5; }
+.live-readiness { display: grid; max-width: 48rem; margin-top: 24px; padding: 16px 18px; border-left: 5px solid var(--color-info); border-radius: 0 12px 12px 0; background: #fffdf8; gap: 8px; }
+.live-readiness strong { color: var(--color-ink); }
+.live-readiness .secondary { margin-top: 4px; }
 .election-form { display: grid; max-width: 48rem; margin-top: 24px; gap: 10px; }
 .form-grid { display: grid; gap: 14px; }
 .form-grid > div { display: grid; gap: 10px; }

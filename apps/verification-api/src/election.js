@@ -31,15 +31,15 @@ function beleniosElection(value) {
   } catch {
     invalid();
   }
-  const match = url.pathname.match(/^\/v3\/elections\/([A-Za-z0-9_-]{6,128})\/$/);
+  const match = url.hash.match(/^#([A-Za-z0-9_-]{6,128})$/);
   if (
     url.protocol !== "https:" ||
     url.hostname !== "vote.belenios.org" ||
     url.port ||
     url.username ||
     url.password ||
+    url.pathname !== "/v3/election" ||
     url.search ||
-    url.hash ||
     !match
   ) {
     invalid();

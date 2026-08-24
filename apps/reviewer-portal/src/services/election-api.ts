@@ -18,8 +18,16 @@ export type ElectionConfigurationInput = Omit<
   "electionUuid" | "revision" | "updatedAt"
 > & { expectedRevision: number };
 
+export type ElectionReadiness = {
+  state: "Draft" | "Open" | "Closed" | "Shuffling" | "EncryptedTally" | "Tallied" | "Archived";
+  canVote: boolean;
+  opensAt?: string;
+  closesAt?: string;
+};
+
 export type ElectionApi = {
   getConfiguration(): Promise<ElectionConfiguration | null>;
+  getReadiness(): Promise<ElectionReadiness | null>;
   saveConfiguration(input: ElectionConfigurationInput): Promise<ElectionConfiguration>;
 };
 
@@ -36,14 +44,14 @@ const validBeleniosUrl = (value: unknown, electionUuid: unknown): value is strin
   if (typeof value !== "string" || typeof electionUuid !== "string") return false;
   try {
     const url = new URL(value);
-    const match = url.pathname.match(/^\/v3\/elections\/([A-Za-z0-9_-]{6,128})\/$/);
+    const match = url.hash.match(/^#([A-Za-z0-9_-]{6,128})$/);
     return url.protocol === "https:" &&
       url.hostname === "vote.belenios.org" &&
       url.port === "" &&
       url.username === "" &&
       url.password === "" &&
+      url.pathname === "/v3/election" &&
       url.search === "" &&
-      url.hash === "" &&
       match?.[1] === electionUuid;
   } catch {
     return false;
@@ -66,6 +74,24 @@ const validConfiguration = (value: unknown): value is ElectionConfiguration =>
   Number.isInteger(value.revision) &&
   Number(value.revision) >= 1 &&
   isIsoTimestamp(value.updatedAt);
+
+const ELECTION_STATES = new Set([
+  "Draft",
+  "Open",
+  "Closed",
+  "Shuffling",
+  "EncryptedTally",
+  "Tallied",
+  "Archived",
+]);
+
+const validReadiness = (value: unknown): value is ElectionReadiness =>
+  isRecord(value) &&
+  ELECTION_STATES.has(String(value.state)) &&
+  typeof value.canVote === "boolean" &&
+  value.canVote === (value.state === "Open") &&
+  (value.opensAt === undefined || isIsoTimestamp(value.opensAt)) &&
+  (value.closesAt === undefined || isIsoTimestamp(value.closesAt));
 
 const readResponse = async (response: Response) => {
   if (!response.ok) {
@@ -92,6 +118,17 @@ export const createElectionApi = (
       if (body.configuration === null) return null;
       if (!validConfiguration(body.configuration)) throw new Error("invalid election response");
       return body.configuration;
+    },
+    getReadiness: async () => {
+      const response = await fetchRequest("/v1/admin/election-readiness", {
+        headers: await headers(),
+      });
+      if (response.status === 404) return null;
+      const body = await readResponse(response);
+      if (!isRecord(body) || !validReadiness(body.readiness)) {
+        throw new Error("invalid election response");
+      }
+      return body.readiness;
     },
     saveConfiguration: async (input) => {
       const body = await readResponse(await fetchRequest("/v1/admin/election-configuration", {

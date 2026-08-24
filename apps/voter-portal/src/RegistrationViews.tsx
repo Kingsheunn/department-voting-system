@@ -181,14 +181,24 @@ export function SuccessState({ election }: { election: PublicElectionConfigurati
           <span>
             Opens {new Date(election.opensAt).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}
           </span>
-          <a
-            className="primary-action ballot-action"
-            href={election.publicUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Continue to secure ballot
-          </a>
+          {election.canVote ? (
+            <a
+              className="primary-action ballot-action"
+              href={election.publicUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Continue to secure ballot
+            </a>
+          ) : (
+            <span className="election-pending" role="status">
+              {election.state === "Draft"
+                ? "Voting has not opened yet."
+                : election.state === "Closed"
+                  ? "Voting is currently closed."
+                : "Voting is no longer open."}
+            </span>
+          )}
         </div>
       ) : (
         <p className="election-pending">The ballot link will appear here after the administrator publishes the election.</p>

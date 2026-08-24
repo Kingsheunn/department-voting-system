@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 
 import { createApiHandler } from "./app.js";
+import { createBeleniosClient } from "./belenios.js";
 import { readRuntimeConfig } from "./config.js";
 import { createDojahDetailsResolver, createDojahResolver } from "./dojah.js";
 import { createDojahEvidenceService } from "./evidence.js";
@@ -63,6 +64,7 @@ const handler = createApiHandler({
   manualReviewEnabled: config.manualReviewEnabled,
   electionConfigurationEnabled: config.electionConfigurationEnabled,
   providerEnvironment: config.dojah.environment,
+  beleniosClient: createBeleniosClient(),
 });
 
 createServer(handler).listen(config.port, "0.0.0.0");

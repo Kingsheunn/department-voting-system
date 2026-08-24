@@ -220,6 +220,7 @@ export function createApiHandler({
   attemptRateLimit,
   providerEnvironment,
   evidenceService,
+  beleniosClient,
 }) {
   if (
     !store ||
@@ -232,7 +233,8 @@ export function createApiHandler({
       (!firebaseAuth?.verifyStaffToken ||
         !firebaseAuth?.verifyIdentityToken ||
         !store.getElectionConfiguration ||
-        !store.saveElectionConfiguration))
+        !store.saveElectionConfiguration ||
+        !beleniosClient?.getElectionReadiness))
   ) {
     throw new Error("Verification API dependencies are incomplete");
   }
@@ -383,6 +385,23 @@ export function createApiHandler({
         }
       }
 
+      if (url.pathname === "/v1/admin/election-readiness" && request.method === "GET") {
+        if (!electionConfigurationEnabled) {
+          throw new HttpError(503, "Election configuration is disabled");
+        }
+        const staff = await authorizedStaff(request, firebaseAuth);
+        if (staff.verificationAdmin !== true) throw new HttpError(403, "Forbidden");
+        const configuration = await store.getElectionConfiguration();
+        if (!configuration) throw new HttpError(404, "Election is not configured");
+        try {
+          return sendJson(response, 200, {
+            readiness: await beleniosClient.getElectionReadiness(configuration.electionUuid),
+          });
+        } catch {
+          throw new HttpError(503, "Election readiness is unavailable");
+        }
+      }
+
       if (url.pathname === "/v1/election/current" && request.method === "GET") {
         if (!electionConfigurationEnabled) {
           throw new HttpError(503, "Election configuration is disabled");
@@ -392,7 +411,20 @@ export function createApiHandler({
           await store.getElectionConfiguration(),
         );
         if (!configuration) throw new HttpError(404, "Election is not published");
-        return sendJson(response, 200, configuration);
+        try {
+          const readiness = await beleniosClient.getElectionReadiness(
+            configuration.electionUuid,
+          );
+          return sendJson(response, 200, {
+            ...configuration,
+            opensAt: readiness.opensAt ?? configuration.opensAt,
+            closesAt: readiness.closesAt ?? configuration.closesAt,
+            state: readiness.state,
+            canVote: readiness.canVote,
+          });
+        } catch {
+          throw new HttpError(503, "Election readiness is unavailable");
+        }
       }
 
       const reviewRoute = url.pathname.match(
