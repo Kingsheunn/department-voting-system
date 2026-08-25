@@ -4,7 +4,7 @@ Trusted Node backend for the registration gate. It creates DoJah attempts, verif
 
 ## Runtime
 
-- Node.js 20.6 or newer
+- Node.js 22 or newer
 - `firebase-admin` 14.2.0
 - Application Default Credentials for the Firebase project
 - Firestore in production; the in-memory store is limited to tests and local development
@@ -23,6 +23,7 @@ Required environment variable names:
 - `FIREBASE_PROJECT_ID` when Firestore or account provisioning is enabled
 - `FIREBASE_AUTH_EMULATOR_HOST` for sandbox account provisioning; omit the protocol
 - `PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED=true` after production ingress limiting is configured
+- `WEB_ALLOWED_ORIGINS` as comma-separated, exact HTTPS origins for the hosted voter and reviewer portals; required in production
 - `NODE_ENV` (`development`, `test`, or `production`)
 - `STORE_DRIVER` (`firestore` or `memory`)
 - `PORT`
@@ -54,6 +55,7 @@ uses only the process environment supplied by the deployment platform. Copy
 
 ## HTTP surface
 
+- `GET /healthz`
 - `POST /v1/verification-attempts`
 - `GET /v1/verification-attempts/:id`
 - `POST /v1/verification-attempts/:id/exchange`
@@ -64,6 +66,14 @@ uses only the process environment supplied by the deployment platform. Copy
 - `GET /v1/election/current` (verified voter identity required)
 
 Attempt status and exchange require the claim token returned at creation. The store retains only its SHA-256 hash, and the single-use credential expires after 24 hours. Firebase UID reservations are transactionally keyed by a normalized-email fingerprint so repeat verification for one email cannot create competing accounts. All responses use `Cache-Control: no-store`.
+
+Browser requests are accepted only from the exact origins in
+`WEB_ALLOWED_ORIGINS`. Preflight permits `GET`, `POST`, `PUT`, and the three
+application request headers (`authorization`, `content-type`, and
+`idempotency-key`). Requests without an `Origin` remain available for trusted
+server-to-server integrations such as the DoJah webhook. CORS is not an
+authorization control; Firebase tokens, claim tokens, and webhook signatures
+remain mandatory on their respective routes.
 
 Approval requires an authoritative completed DoJah result, the exact verified
 school email, and the documented dedicated liveness verdict

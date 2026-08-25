@@ -65,6 +65,7 @@ const handler = createApiHandler({
   electionConfigurationEnabled: config.electionConfigurationEnabled,
   providerEnvironment: config.dojah.environment,
   beleniosClient: createBeleniosClient(),
+  allowedOrigins: config.allowedOrigins,
 });
 
 createServer(handler).listen(config.port, "0.0.0.0");

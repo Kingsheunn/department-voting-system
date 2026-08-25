@@ -61,6 +61,39 @@ function emulatorHost(environment, name) {
   return value;
 }
 
+function allowedOrigins(environment, nodeEnvironment) {
+  const values = (environment.WEB_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (nodeEnvironment === "production" && values.length === 0) {
+    throw new Error("Web allowed origins must contain production portal origins");
+  }
+
+  const unique = new Set();
+  for (const value of values) {
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new Error("Web allowed origins must contain exact HTTPS origins");
+    }
+    if (
+      url.protocol !== "https:" ||
+      value !== url.origin ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error("Web allowed origins must contain exact HTTPS origins");
+    }
+    unique.add(value);
+  }
+  return [...unique];
+}
+
 export function readRuntimeConfig(environment) {
   const port = Number(environment.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -71,6 +104,7 @@ export function readRuntimeConfig(environment) {
   if (!NODE_ENVIRONMENTS.has(nodeEnvironment)) {
     throw new Error("NODE_ENV must be development, test, or production");
   }
+  const webAllowedOrigins = allowedOrigins(environment, nodeEnvironment);
   const storeDriver = environment.STORE_DRIVER ?? "firestore";
   if (!new Set(["firestore", "memory"]).has(storeDriver)) {
     throw new Error("Runtime store driver is invalid");
@@ -173,6 +207,7 @@ export function readRuntimeConfig(environment) {
 
   return {
     port,
+    allowedOrigins: webAllowedOrigins,
     storeDriver,
     accountProvisioningEnabled,
     manualReviewEnabled,
