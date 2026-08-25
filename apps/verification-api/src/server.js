@@ -66,6 +66,7 @@ const handler = createApiHandler({
   providerEnvironment: config.dojah.environment,
   beleniosClient: createBeleniosClient(),
   allowedOrigins: config.allowedOrigins,
+  edgeSharedSecret: config.edgeSharedSecret,
 });
 
 createServer(handler).listen(config.port, "0.0.0.0");

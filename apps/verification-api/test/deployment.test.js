@@ -5,7 +5,7 @@ import test from "node:test";
 import { createApiHandler } from "../src/app.js";
 import { createMemoryStore } from "../src/memory-store.js";
 
-async function startApi(allowedOrigins = []) {
+async function startApi(allowedOrigins = [], { edgeSharedSecret } = {}) {
   const handler = createApiHandler({
     store: createMemoryStore(),
     dojahResolver: async () => ({}),
@@ -13,6 +13,7 @@ async function startApi(allowedOrigins = []) {
     webhookSecret: "test-only-secret",
     providerEnvironment: "sandbox",
     allowedOrigins,
+    edgeSharedSecret,
   });
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -24,6 +25,55 @@ async function startApi(allowedOrigins = []) {
       server.close((error) => (error ? reject(error) : resolve()))),
   };
 }
+
+test("keeps liveness public but rejects protected direct-origin requests", async () => {
+  const edgeSharedSecret = "e".repeat(32);
+  const api = await startApi([], { edgeSharedSecret });
+  try {
+    assert.equal((await fetch(`${api.origin}/healthz`)).status, 200);
+
+    const missing = await fetch(`${api.origin}/v1/election/current`);
+    assert.equal(missing.status, 403);
+    assert.deepEqual(await missing.json(), { error: "Edge authorization is required" });
+
+    const wrong = await fetch(`${api.origin}/v1/election/current`, {
+      headers: { "X-Department-Edge-Auth": "wrong-secret" },
+    });
+    assert.equal(wrong.status, 403);
+
+    const authorized = await fetch(`${api.origin}/v1/election/current`, {
+      headers: { "X-Department-Edge-Auth": edgeSharedSecret },
+    });
+    assert.equal(authorized.status, 503);
+    assert.deepEqual(await authorized.json(), { error: "Election configuration is disabled" });
+  } finally {
+    await api.close();
+  }
+});
+
+test("uses only the authenticated edge fingerprint for defense-in-depth limiting", async () => {
+  const edgeSharedSecret = "e".repeat(32);
+  const api = await startApi([], { edgeSharedSecret });
+  const createAttempt = (edgeClient) => fetch(`${api.origin}/v1/verification-attempts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Department-Edge-Auth": edgeSharedSecret,
+      "X-Department-Edge-Client": edgeClient,
+    },
+    body: JSON.stringify({ email: "student@students.unilorin.edu.ng" }),
+  });
+
+  try {
+    for (let count = 0; count < 5; count += 1) {
+      assert.equal((await createAttempt("client-a")).status, 201);
+    }
+    assert.equal((await createAttempt("client-a")).status, 429);
+    assert.equal((await createAttempt("client-b")).status, 201);
+  } finally {
+    await api.close();
+  }
+});
 
 test("reports API liveness without exposing configuration", async () => {
   const api = await startApi();

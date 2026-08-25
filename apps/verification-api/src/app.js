@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 import {
   buildDojahLaunchUrl,
   createAttemptMaterial,
@@ -22,6 +24,8 @@ const CORS_METHODS = "GET, POST, PUT, OPTIONS";
 const CORS_HEADERS = "authorization, content-type, idempotency-key";
 const CORS_HEADER_SET = new Set(CORS_HEADERS.split(", "));
 const CORS_METHOD_SET = new Set(CORS_METHODS.split(", "));
+const EDGE_AUTH_HEADER = "x-department-edge-auth";
+const EDGE_CLIENT_HEADER = "x-department-edge-client";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -124,6 +128,14 @@ function applyCors(request, response, allowedOrigins) {
   response.setHeader("access-control-allow-headers", CORS_HEADERS);
   response.setHeader("access-control-max-age", "600");
   return true;
+}
+
+function edgeSecretMatches(request, expectedSecret) {
+  const actualSecret = request.headers?.[EDGE_AUTH_HEADER];
+  if (typeof actualSecret !== "string") return false;
+  const actual = Buffer.from(actualSecret);
+  const expected = Buffer.from(expectedSecret);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 function bearerToken(request) {
@@ -257,6 +269,7 @@ export function createApiHandler({
   evidenceService,
   beleniosClient,
   allowedOrigins = [],
+  edgeSharedSecret,
 }) {
   if (
     !store ||
@@ -303,6 +316,10 @@ export function createApiHandler({
   return async function handleRequest(request, response) {
     try {
       const url = new URL(request.url, "http://localhost");
+      const publicHealthCheck = request.method === "GET" && url.pathname === "/healthz";
+      if (edgeSharedSecret && !publicHealthCheck && !edgeSecretMatches(request, edgeSharedSecret)) {
+        throw new HttpError(403, "Edge authorization is required");
+      }
       if (applyCors(request, response, allowedOriginSet)) {
         return sendJson(response, 204);
       }
@@ -312,7 +329,10 @@ export function createApiHandler({
       }
 
       if (request.method === "POST" && url.pathname === "/v1/verification-attempts") {
-        if (!allowAttempt(request.socket.remoteAddress ?? "unknown")) {
+        const limiterKey = edgeSharedSecret
+          ? request.headers?.[EDGE_CLIENT_HEADER] ?? "edge-client-unavailable"
+          : request.socket.remoteAddress ?? "unknown";
+        if (!allowAttempt(limiterKey)) {
           throw new HttpError(429, "Too many verification attempts");
         }
         const body = parseJson(await readBody(request, JSON_LIMIT));

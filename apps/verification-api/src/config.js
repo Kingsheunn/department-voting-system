@@ -116,6 +116,16 @@ export function readRuntimeConfig(environment) {
   if (nodeEnvironment === "production" && !ingressRateLimitConfirmed) {
     throw new Error("Production ingress rate limit must be confirmed");
   }
+  const edgeSharedSecret = environment.EDGE_SHARED_SECRET;
+  if (
+    edgeSharedSecret !== undefined &&
+    (typeof edgeSharedSecret !== "string" || edgeSharedSecret.length < 32)
+  ) {
+    throw new Error("Edge shared secret must contain at least 32 characters");
+  }
+  if (nodeEnvironment === "production" && !edgeSharedSecret) {
+    throw new Error("Production requires an edge shared secret");
+  }
   if (nodeEnvironment === "production" && storeDriver === "memory") {
     throw new Error("The memory store is not permitted in production");
   }
@@ -212,6 +222,7 @@ export function readRuntimeConfig(environment) {
     accountProvisioningEnabled,
     manualReviewEnabled,
     electionConfigurationEnabled,
+    edgeSharedSecret,
     firebase: {
       required: firebaseRequired,
       projectId: firebaseProjectId,

@@ -181,6 +181,7 @@ test("rejects unsafe emulator hosts and emulator configuration in production", (
         FIREBASE_PROJECT_ID: "department-voting",
         FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
         PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
         WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
       }),
     /emulator.*production|production.*emulator/i,
@@ -196,6 +197,7 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
     ACCOUNT_PROVISIONING_ENABLED: "true",
     FIREBASE_PROJECT_ID: "department-voting",
     PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+    EDGE_SHARED_SECRET: "e".repeat(32),
     WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
   };
 
@@ -220,6 +222,14 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
       }),
     /ingress rate limit/i,
   );
+  assert.throws(
+    () => readRuntimeConfig({ ...production, EDGE_SHARED_SECRET: "" }),
+    /edge shared secret/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...production, EDGE_SHARED_SECRET: "too-short" }),
+    /edge shared secret/i,
+  );
 });
 
 test("refuses incomplete or unsafe runtime configuration", () => {
@@ -234,6 +244,7 @@ test("refuses incomplete or unsafe runtime configuration", () => {
         ...validEnvironment,
         NODE_ENV: "production",
         PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
         WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
       }),
     /memory store/i,

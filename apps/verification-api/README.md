@@ -23,6 +23,7 @@ Required environment variable names:
 - `FIREBASE_PROJECT_ID` when Firestore or account provisioning is enabled
 - `FIREBASE_AUTH_EMULATOR_HOST` for sandbox account provisioning; omit the protocol
 - `PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED=true` after production ingress limiting is configured
+- `EDGE_SHARED_SECRET` (at least 32 random characters; required in production and shared only with the edge gateway)
 - `WEB_ALLOWED_ORIGINS` as comma-separated, exact HTTPS origins for the hosted voter and reviewer portals; required in production
 - `NODE_ENV` (`development`, `test`, or `production`)
 - `STORE_DRIVER` (`firestore` or `memory`)
@@ -92,7 +93,14 @@ Successful exchange consumes the claim credential; a transient Firebase
 provisioning failure releases the reservation for a safe retry.
 
 The process applies a small per-address fixed-window attempt limiter as
-defense-in-depth. Production still requires a distributed ingress rate limit.
+defense-in-depth. Production routes other than `GET /healthz` also require the
+constant-time-checked edge secret. The Cloudflare gateway performs the
+distributed ingress check and replaces the trusted client fingerprint header;
+direct requests to the Render origin cannot reach protected routes. The gateway
+accepts attempt creation only from its exact portal-origin allowlist before
+spending quota. Its 5-per-minute address limit is an approximate Cloudflare
+location-level abuse control, not a strict global quota; shared campus networks
+can share that allowance.
 Attempts and reference-index records receive a Firestore-compatible
 `deleteAfter` date set 24 hours ahead. Enable Firestore TTL separately on that
 field for both collections; writing the field does not activate TTL deletion.
