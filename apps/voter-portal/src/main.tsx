@@ -3,11 +3,13 @@ import ReactDOM from "react-dom/client";
 
 import App from "./App";
 import "./app.css";
+import { createApiFetch } from "./services/api-fetch";
 import { createElectionApi } from "./services/election-api";
 import { createLazyFirebaseAuthService } from "./services/lazy-firebase-auth";
 import { createRegistrationApi } from "./services/registration-api";
 
 const DOJAH_ORIGIN = "https://identity.dojah.io";
+const apiFetch = createApiFetch(import.meta.env.VITE_API_BASE_URL);
 
 const openVerification = (value: string) => {
   const url = new URL(value);
@@ -31,9 +33,9 @@ const firebaseAuth = createLazyFirebaseAuthService(async () => {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App
-      registration={createRegistrationApi()}
+      registration={createRegistrationApi(apiFetch)}
       firebaseAuth={firebaseAuth}
-      election={createElectionApi()}
+      election={createElectionApi(apiFetch)}
       openVerification={openVerification}
     />
   </React.StrictMode>,

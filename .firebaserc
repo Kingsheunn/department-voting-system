@@ -1,5 +1,18 @@
 {
   "projects": {
-    "default": "demo-department-voting"
+    "default": "demo-department-voting",
+    "production": "voting-app-6e1fb"
+  },
+  "targets": {
+    "voting-app-6e1fb": {
+      "hosting": {
+        "voter": [
+          "voting-app-6e1fb"
+        ],
+        "reviewer": [
+          "voting-app-6e1fb-reviewer"
+        ]
+      }
+    }
   }
 }

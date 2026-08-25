@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 import {
   buildDojahLaunchUrl,
   createAttemptMaterial,
@@ -18,6 +20,12 @@ const JSON_LIMIT = 16 * 1024;
 const WEBHOOK_LIMIT = 1024 * 1024;
 const ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
 const RETENTION_MS = 24 * 60 * 60 * 1000;
+const CORS_METHODS = "GET, POST, PUT, OPTIONS";
+const CORS_HEADERS = "authorization, content-type, idempotency-key";
+const CORS_HEADER_SET = new Set(CORS_HEADERS.split(", "));
+const CORS_METHOD_SET = new Set(CORS_METHODS.split(", "));
+const EDGE_AUTH_HEADER = "x-department-edge-auth";
+const EDGE_CLIENT_HEADER = "x-department-edge-client";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -89,6 +97,45 @@ function sendImage(response, { contentType, body }) {
   response.setHeader("x-content-type-options", "nosniff");
   response.setHeader("x-frame-options", "DENY");
   response.end(body);
+}
+
+function applyCors(request, response, allowedOrigins) {
+  const headers = request.headers ?? {};
+  const origin = headers.origin;
+  if (!origin) {
+    if (request.method === "OPTIONS") throw new HttpError(403, "Origin is required");
+    return false;
+  }
+  if (!allowedOrigins.has(origin)) throw new HttpError(403, "Origin is not allowed");
+
+  response.setHeader("access-control-allow-origin", origin);
+  response.setHeader("vary", "Origin");
+  if (request.method !== "OPTIONS") return false;
+
+  const requestedMethod = headers["access-control-request-method"];
+  const requestedHeaders = (headers["access-control-request-headers"] ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    typeof requestedMethod !== "string" ||
+    !CORS_METHOD_SET.has(requestedMethod) ||
+    requestedHeaders.some((header) => !CORS_HEADER_SET.has(header))
+  ) {
+    throw new HttpError(403, "CORS preflight is not allowed");
+  }
+  response.setHeader("access-control-allow-methods", CORS_METHODS);
+  response.setHeader("access-control-allow-headers", CORS_HEADERS);
+  response.setHeader("access-control-max-age", "600");
+  return true;
+}
+
+function edgeSecretMatches(request, expectedSecret) {
+  const actualSecret = request.headers?.[EDGE_AUTH_HEADER];
+  if (typeof actualSecret !== "string") return false;
+  const actual = Buffer.from(actualSecret);
+  const expected = Buffer.from(expectedSecret);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 function bearerToken(request) {
@@ -221,6 +268,8 @@ export function createApiHandler({
   providerEnvironment,
   evidenceService,
   beleniosClient,
+  allowedOrigins = [],
+  edgeSharedSecret,
 }) {
   if (
     !store ||
@@ -238,6 +287,10 @@ export function createApiHandler({
   ) {
     throw new Error("Verification API dependencies are incomplete");
   }
+  if (!Array.isArray(allowedOrigins) || allowedOrigins.some((origin) => typeof origin !== "string")) {
+    throw new Error("Verification API allowed origins are invalid");
+  }
+  const allowedOriginSet = new Set(allowedOrigins);
   const rateLimit = {
     maxAttempts: 5,
     windowMs: 60_000,
@@ -263,9 +316,23 @@ export function createApiHandler({
   return async function handleRequest(request, response) {
     try {
       const url = new URL(request.url, "http://localhost");
+      const publicHealthCheck = request.method === "GET" && url.pathname === "/healthz";
+      if (edgeSharedSecret && !publicHealthCheck && !edgeSecretMatches(request, edgeSharedSecret)) {
+        throw new HttpError(403, "Edge authorization is required");
+      }
+      if (applyCors(request, response, allowedOriginSet)) {
+        return sendJson(response, 204);
+      }
+
+      if (request.method === "GET" && url.pathname === "/healthz") {
+        return sendJson(response, 200, { status: "ok" });
+      }
 
       if (request.method === "POST" && url.pathname === "/v1/verification-attempts") {
-        if (!allowAttempt(request.socket.remoteAddress ?? "unknown")) {
+        const limiterKey = edgeSharedSecret
+          ? request.headers?.[EDGE_CLIENT_HEADER] ?? "edge-client-unavailable"
+          : request.socket.remoteAddress ?? "unknown";
+        if (!allowAttempt(limiterKey)) {
           throw new HttpError(429, "Too many verification attempts");
         }
         const body = parseJson(await readBody(request, JSON_LIMIT));

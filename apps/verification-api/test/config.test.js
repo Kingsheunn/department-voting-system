@@ -24,6 +24,34 @@ test("reads explicit runtime configuration without exposing secret values", () =
   assert.deepEqual(config.dojah.allowedDocumentTypes, []);
   assert.equal(config.accountProvisioningEnabled, false);
   assert.equal(config.firebase.required, false);
+  assert.deepEqual(config.allowedOrigins, []);
+});
+
+test("accepts exact HTTPS portal origins", () => {
+  const config = readRuntimeConfig({
+    ...validEnvironment,
+    WEB_ALLOWED_ORIGINS:
+      "https://department-voting.web.app,https://department-voting-review.web.app",
+  });
+
+  assert.deepEqual(config.allowedOrigins, [
+    "https://department-voting.web.app",
+    "https://department-voting-review.web.app",
+  ]);
+});
+
+test("rejects malformed or insecure portal origins", () => {
+  for (const value of [
+    "http://department-voting.web.app",
+    "https://department-voting.web.app/path",
+    "https://user@department-voting.web.app",
+    "null",
+  ]) {
+    assert.throws(
+      () => readRuntimeConfig({ ...validEnvironment, WEB_ALLOWED_ORIGINS: value }),
+      /allowed origins/i,
+    );
+  }
 });
 
 test("reads an explicitly confirmed DoJah verification contract", () => {
@@ -153,6 +181,8 @@ test("rejects unsafe emulator hosts and emulator configuration in production", (
         FIREBASE_PROJECT_ID: "department-voting",
         FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
         PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
+        WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
       }),
     /emulator.*production|production.*emulator/i,
   );
@@ -167,9 +197,15 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
     ACCOUNT_PROVISIONING_ENABLED: "true",
     FIREBASE_PROJECT_ID: "department-voting",
     PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+    EDGE_SHARED_SECRET: "e".repeat(32),
+    WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
   };
 
   assert.equal(readRuntimeConfig(production).accountProvisioningEnabled, true);
+  assert.throws(
+    () => readRuntimeConfig({ ...production, WEB_ALLOWED_ORIGINS: "" }),
+    /allowed origins/i,
+  );
   assert.throws(
     () => readRuntimeConfig({ ...production, DOJAH_BASE_URL: "https://sandbox.dojah.io" }),
     /production dojah/i,
@@ -186,6 +222,14 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
       }),
     /ingress rate limit/i,
   );
+  assert.throws(
+    () => readRuntimeConfig({ ...production, EDGE_SHARED_SECRET: "" }),
+    /edge shared secret/i,
+  );
+  assert.throws(
+    () => readRuntimeConfig({ ...production, EDGE_SHARED_SECRET: "too-short" }),
+    /edge shared secret/i,
+  );
 });
 
 test("refuses incomplete or unsafe runtime configuration", () => {
@@ -200,6 +244,8 @@ test("refuses incomplete or unsafe runtime configuration", () => {
         ...validEnvironment,
         NODE_ENV: "production",
         PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
+        WEB_ALLOWED_ORIGINS: "https://department-voting.web.app",
       }),
     /memory store/i,
   );

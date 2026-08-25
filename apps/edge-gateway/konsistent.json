@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "gateway-test-imports-worker",
+      "description": "The gateway test imports the deployed worker module.",
+      "severity": "error",
+      "paths": "test/worker.test.js",
+      "must": {
+        "importFrom": "../src/worker.js"
+      }
+    }
+  ]
+}

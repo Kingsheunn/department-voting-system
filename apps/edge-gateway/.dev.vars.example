@@ -1,0 +1,3 @@
+UPSTREAM_ORIGIN=https://your-api-service.onrender.com
+ORIGIN_SHARED_SECRET=generate_at_least_32_random_characters
+ALLOWED_PORTAL_ORIGINS=https://your-voter-site.web.app,https://your-reviewer-site.web.app
