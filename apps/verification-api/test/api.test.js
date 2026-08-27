@@ -314,6 +314,7 @@ test("uses authoritative DoJah details before approval and exchanges once approv
   assert.match(exchangeBody.firebaseCustomToken, /^firebase-token-fv_/);
   assert.equal(api.firebaseCalls.length, 1);
   assert.equal(api.firebaseCalls[0].email, schoolEmail);
+  assert.equal(api.firebaseCalls[0].providerEnvironment, "sandbox");
 });
 
 test("keeps completed verification pending until the DoJah contract is confirmed", async (t) => {

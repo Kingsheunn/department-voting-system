@@ -14,10 +14,14 @@ export function createFirebaseAuthAdapter(auth) {
       return {
         uid: decoded.uid,
         identityVerified: decoded.identityVerified === true,
+        verificationEnvironment: decoded.verificationEnvironment,
       };
     },
 
-    async provisionAndMint({ uid, email }) {
+    async provisionAndMint({ uid, email, providerEnvironment }) {
+      if (!new Set(["sandbox", "production"]).has(providerEnvironment)) {
+        throw new Error("Firebase verification environment is invalid");
+      }
       let user;
       try {
         user = await auth.getUser(uid);
@@ -45,7 +49,13 @@ export function createFirebaseAuthAdapter(auth) {
       if (user.email !== email || user.emailVerified !== true) {
         throw new Error("Firebase identity conflict");
       }
-      return auth.createCustomToken(uid, { identityVerified: true });
+      const claims = {
+        ...(user.customClaims ?? {}),
+        identityVerified: true,
+        verificationEnvironment: providerEnvironment,
+      };
+      await auth.setCustomUserClaims(uid, claims);
+      return auth.createCustomToken(uid, claims);
     },
   };
 }

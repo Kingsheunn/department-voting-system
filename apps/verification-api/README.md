@@ -21,6 +21,7 @@ Required environment variable names:
 - `ACCOUNT_PROVISIONING_ENABLED` (defaults to `false`)
 - `ELECTION_CONFIGURATION_ENABLED` (defaults to `false`; requires Firestore and Firebase Auth)
 - `FIREBASE_PROJECT_ID` when Firestore or account provisioning is enabled
+- `HOSTED_SANDBOX_FIREBASE_PROJECT_ID` only for an approved hosted sandbox pilot; it must exactly match the non-demo `FIREBASE_PROJECT_ID` and must be removed before switching DoJah live
 - `FIREBASE_AUTH_EMULATOR_HOST` for sandbox account provisioning; omit the protocol
 - `PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED=true` after production ingress limiting is configured
 - `EDGE_SHARED_SECRET` (at least 32 random characters; required in production and shared only with the edge gateway)
@@ -84,11 +85,20 @@ for `data.id.data.id_data.document_type`; a custom student-card upload can only
 enter protected manual review after the non-human checks pass. Until
 `DOJAH_VERIFICATION_CONTRACT_CONFIRMED=true`, completed results remain in
 `pending_review`. Account provisioning is independently disabled by default.
-Sandbox provisioning requires the Firebase Auth Emulator; production
-provisioning requires the production DoJah host and Firestore.
+Local sandbox provisioning requires the Firebase Auth Emulator. An explicitly
+approved hosted sandbox pilot may instead use real Firestore and Auth only when
+`NODE_ENV=production`, `HOSTED_SANDBOX_FIREBASE_PROJECT_ID` exactly matches the
+non-demo `FIREBASE_PROJECT_ID`, no Firebase emulator is configured, and all
+production ingress controls are enabled. The binding must be removed before
+switching to the live DoJah host. Production provisioning requires the live
+DoJah host and Firestore.
 The field paths follow DoJah's [verification-details reference](https://docs.dojah.io/docs/technical-reference/get-verification-details).
 Each attempt snapshots its contract, document allowlist, and provider
 environment, so later configuration changes cannot retroactively approve it.
+Firebase voter tokens carry that provider environment as a custom claim, and
+voter-authorized routes reject missing or mismatched claims. Sandbox-verified
+voters must re-verify after the provider switches live; the existing Firebase
+UID may be reused, but sandbox assurance is never promoted to production.
 Successful exchange consumes the claim credential; a transient Firebase
 provisioning failure releases the reservation for a safe retry.
 

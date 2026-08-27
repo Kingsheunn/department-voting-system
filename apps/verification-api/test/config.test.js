@@ -208,7 +208,7 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
   );
   assert.throws(
     () => readRuntimeConfig({ ...production, DOJAH_BASE_URL: "https://sandbox.dojah.io" }),
-    /production dojah/i,
+    /production dojah|hosted sandbox firebase project/i,
   );
   assert.throws(
     () => readRuntimeConfig({ ...production, STORE_DRIVER: "memory" }),
@@ -229,6 +229,93 @@ test("requires production DoJah, Firestore, and ingress limiting for production 
   assert.throws(
     () => readRuntimeConfig({ ...production, EDGE_SHARED_SECRET: "too-short" }),
     /edge shared secret/i,
+  );
+});
+
+test("allows hosted sandbox provisioning only when the Firebase project binding is exact", () => {
+  const hostedSandbox = {
+    ...validEnvironment,
+    NODE_ENV: "production",
+    STORE_DRIVER: "firestore",
+    ACCOUNT_PROVISIONING_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+    HOSTED_SANDBOX_FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+    PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+    EDGE_SHARED_SECRET: "e".repeat(32),
+    WEB_ALLOWED_ORIGINS:
+      "https://voting-app-6e1fb.web.app,https://voting-app-6e1fb-reviewer.web.app",
+  };
+
+  const config = readRuntimeConfig(hostedSandbox);
+
+  assert.equal(config.accountProvisioningEnabled, true);
+  assert.equal(config.storeDriver, "firestore");
+  assert.equal(config.dojah.environment, "sandbox");
+  assert.equal(config.firebase.projectId, "voting-app-6e1fb");
+  assert.equal(config.firebase.authEmulatorHost, undefined);
+  assert.equal(config.firebase.firestoreEmulatorHost, undefined);
+});
+
+test("rejects hosted sandbox provisioning without an exact Firebase project binding", () => {
+  const hostedSandbox = {
+    ...validEnvironment,
+    NODE_ENV: "production",
+    STORE_DRIVER: "firestore",
+    ACCOUNT_PROVISIONING_ENABLED: "true",
+    FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+    PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+    EDGE_SHARED_SECRET: "e".repeat(32),
+    WEB_ALLOWED_ORIGINS: "https://voting-app-6e1fb.web.app",
+  };
+
+  assert.throws(
+    () => readRuntimeConfig(hostedSandbox),
+    /hosted sandbox firebase project/i,
+  );
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...hostedSandbox,
+        HOSTED_SANDBOX_FIREBASE_PROJECT_ID: "another-firebase-project",
+      }),
+    /hosted sandbox firebase project/i,
+  );
+});
+
+test("rejects hosted sandbox provisioning outside a production runtime", () => {
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        NODE_ENV: "development",
+        STORE_DRIVER: "firestore",
+        ACCOUNT_PROVISIONING_ENABLED: "true",
+        FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+        HOSTED_SANDBOX_FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+        PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
+        WEB_ALLOWED_ORIGINS: "https://voting-app-6e1fb.web.app",
+      }),
+    /hosted sandbox.*production/i,
+  );
+});
+
+test("rejects a stale hosted sandbox binding after the identity provider switches live", () => {
+  assert.throws(
+    () =>
+      readRuntimeConfig({
+        ...validEnvironment,
+        NODE_ENV: "production",
+        STORE_DRIVER: "firestore",
+        DOJAH_BASE_URL: "https://api.dojah.io",
+        ACCOUNT_PROVISIONING_ENABLED: "true",
+        FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+        HOSTED_SANDBOX_FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+        PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+        EDGE_SHARED_SECRET: "e".repeat(32),
+        WEB_ALLOWED_ORIGINS: "https://voting-app-6e1fb.web.app",
+      }),
+    /hosted sandbox firebase project/i,
   );
 });
 

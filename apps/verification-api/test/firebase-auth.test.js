@@ -15,6 +15,9 @@ test("creates a verified Firebase user before minting a custom token", async () 
       calls.push(["createUser", input]);
       return input;
     },
+    async setCustomUserClaims(uid, claims) {
+      calls.push(["setCustomUserClaims", uid, claims]);
+    },
     async createCustomToken(uid, claims) {
       calls.push(["createCustomToken", uid, claims]);
       return `custom-token-for-${uid}`;
@@ -25,6 +28,7 @@ test("creates a verified Firebase user before minting a custom token", async () 
   const token = await adapter.provisionAndMint({
     uid: "fv_stable-user",
     email: "student.one@students.unilorin.edu.ng",
+    providerEnvironment: "sandbox",
   });
 
   assert.equal(token, "custom-token-for-fv_stable-user");
@@ -38,9 +42,53 @@ test("creates a verified Firebase user before minting a custom token", async () 
     },
   ]);
   assert.deepEqual(calls[1], [
+    "setCustomUserClaims",
+    "fv_stable-user",
+    { identityVerified: true, verificationEnvironment: "sandbox" },
+  ]);
+  assert.deepEqual(calls[2], [
     "createCustomToken",
     "fv_stable-user",
-    { identityVerified: true },
+    { identityVerified: true, verificationEnvironment: "sandbox" },
+  ]);
+});
+
+test("persists and mints environment-bound claims without deleting unrelated claims", async () => {
+  const calls = [];
+  const auth = {
+    async getUser() {
+      return {
+        uid: "fv_stable-user",
+        email: "student.one@students.unilorin.edu.ng",
+        emailVerified: true,
+        customClaims: { locale: "en", verificationReviewer: false },
+      };
+    },
+    async setCustomUserClaims(uid, claims) {
+      calls.push(["setCustomUserClaims", uid, claims]);
+    },
+    async createCustomToken(uid, claims) {
+      calls.push(["createCustomToken", uid, claims]);
+      return `custom-token-for-${uid}`;
+    },
+  };
+
+  const token = await createFirebaseAuthAdapter(auth).provisionAndMint({
+    uid: "fv_stable-user",
+    email: "student.one@students.unilorin.edu.ng",
+    providerEnvironment: "production",
+  });
+  const expectedClaims = {
+    locale: "en",
+    verificationReviewer: false,
+    identityVerified: true,
+    verificationEnvironment: "production",
+  };
+
+  assert.equal(token, "custom-token-for-fv_stable-user");
+  assert.deepEqual(calls, [
+    ["setCustomUserClaims", "fv_stable-user", expectedClaims],
+    ["createCustomToken", "fv_stable-user", expectedClaims],
   ]);
 });
 
@@ -58,6 +106,7 @@ test("rejects an existing Firebase UID bound to another email", async () => {
     adapter.provisionAndMint({
       uid: "fv_stable-user",
       email: "student.one@students.unilorin.edu.ng",
+      providerEnvironment: "sandbox",
     }),
     /identity conflict/i,
   );
@@ -86,12 +135,14 @@ test("recovers from concurrent Firebase creation with the same stable UID", asyn
     async createCustomToken(uid) {
       return `custom-token-for-${uid}`;
     },
+    async setCustomUserClaims() {},
   };
   const adapter = createFirebaseAuthAdapter(auth);
 
   const token = await adapter.provisionAndMint({
     uid: "fv_stable-user",
     email: "student.one@students.unilorin.edu.ng",
+    providerEnvironment: "sandbox",
   });
 
   assert.equal(token, "custom-token-for-fv_stable-user");
@@ -120,6 +171,7 @@ test("recovers an email collision only when it belongs to the reserved UID", asy
     async createCustomToken(uid) {
       return `custom-token-for-${uid}`;
     },
+    async setCustomUserClaims() {},
   };
   const adapter = createFirebaseAuthAdapter(auth);
 
@@ -127,6 +179,7 @@ test("recovers an email collision only when it belongs to the reserved UID", asy
     await adapter.provisionAndMint({
       uid: "fv_stable-user",
       email: "student.one@students.unilorin.edu.ng",
+      providerEnvironment: "sandbox",
     }),
     "custom-token-for-fv_stable-user",
   );
@@ -160,6 +213,7 @@ test("rejects an email collision owned by another Firebase UID", async () => {
     createFirebaseAuthAdapter(auth).provisionAndMint({
       uid: "fv_stable-user",
       email: "student.one@students.unilorin.edu.ng",
+      providerEnvironment: "sandbox",
     }),
     /identity conflict/i,
   );
@@ -193,12 +247,20 @@ test("verifies voter identity tokens with revocation checks", async () => {
   const adapter = createFirebaseAuthAdapter({
     async verifyIdToken(token, checkRevoked) {
       calls.push([token, checkRevoked]);
-      return { uid: "voter-uid", identityVerified: true };
+      return {
+        uid: "voter-uid",
+        identityVerified: true,
+        verificationEnvironment: "sandbox",
+      };
     },
   });
 
   const voter = await adapter.verifyIdentityToken("voter-token");
 
   assert.deepEqual(calls, [["voter-token", true]]);
-  assert.deepEqual(voter, { uid: "voter-uid", identityVerified: true });
+  assert.deepEqual(voter, {
+    uid: "voter-uid",
+    identityVerified: true,
+    verificationEnvironment: "sandbox",
+  });
 });

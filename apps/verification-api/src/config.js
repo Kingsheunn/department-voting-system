@@ -161,26 +161,6 @@ export function readRuntimeConfig(environment) {
   }
   const authEmulatorHost = emulatorHost(environment, "FIREBASE_AUTH_EMULATOR_HOST");
   const firestoreEmulatorHost = emulatorHost(environment, "FIRESTORE_EMULATOR_HOST");
-  if (nodeEnvironment === "production" && (authEmulatorHost || firestoreEmulatorHost)) {
-    throw new Error("Firebase emulators are not permitted in production");
-  }
-  if (
-    nodeEnvironment === "production" &&
-    accountProvisioningEnabled &&
-    dojahHost !== "api.dojah.io"
-  ) {
-    throw new Error("Production provisioning requires the production DoJah host");
-  }
-  if (
-    (accountProvisioningEnabled || manualReviewEnabled || electionConfigurationEnabled) &&
-    dojahHost === "sandbox.dojah.io" &&
-    !authEmulatorHost
-  ) {
-    throw new Error("Sandbox identity operations require the Firebase Auth Emulator");
-  }
-  if (accountProvisioningEnabled && dojahHost === "api.dojah.io" && storeDriver !== "firestore") {
-    throw new Error("Production provisioning requires Firestore");
-  }
   const firebaseRequired =
     storeDriver === "firestore" ||
     accountProvisioningEnabled ||
@@ -189,17 +169,60 @@ export function readRuntimeConfig(environment) {
   const firebaseProjectId = firebaseRequired
     ? required(environment, "FIREBASE_PROJECT_ID")
     : environment.FIREBASE_PROJECT_ID;
+  const hostedSandboxProjectId = environment.HOSTED_SANDBOX_FIREBASE_PROJECT_ID;
+  if (hostedSandboxProjectId) {
+    if (nodeEnvironment !== "production") {
+      throw new Error("Hosted sandbox Firebase requires a production runtime");
+    }
+    if (
+      dojahHost !== "sandbox.dojah.io" ||
+      storeDriver !== "firestore" ||
+      authEmulatorHost ||
+      firestoreEmulatorHost ||
+      !firebaseProjectId ||
+      firebaseProjectId.startsWith("demo-") ||
+      hostedSandboxProjectId !== firebaseProjectId
+    ) {
+      throw new Error("Hosted sandbox Firebase project binding is invalid");
+    }
+  }
+  const hostedSandbox =
+    Boolean(hostedSandboxProjectId) && hostedSandboxProjectId === firebaseProjectId;
+  if (nodeEnvironment === "production" && (authEmulatorHost || firestoreEmulatorHost)) {
+    throw new Error("Firebase emulators are not permitted in production");
+  }
+  if (
+    nodeEnvironment === "production" &&
+    accountProvisioningEnabled &&
+    dojahHost !== "api.dojah.io" &&
+    !hostedSandbox
+  ) {
+    throw new Error("Hosted sandbox Firebase project binding is required");
+  }
+  if (
+    (accountProvisioningEnabled || manualReviewEnabled || electionConfigurationEnabled) &&
+    dojahHost === "sandbox.dojah.io" &&
+    !authEmulatorHost &&
+    !hostedSandbox
+  ) {
+    throw new Error("Sandbox identity operations require the Firebase Auth Emulator");
+  }
+  if (accountProvisioningEnabled && dojahHost === "api.dojah.io" && storeDriver !== "firestore") {
+    throw new Error("Production provisioning requires Firestore");
+  }
   if (
     storeDriver === "firestore" &&
     dojahHost === "sandbox.dojah.io" &&
-    !firestoreEmulatorHost
+    !firestoreEmulatorHost &&
+    !hostedSandbox
   ) {
     throw new Error("Sandbox Firestore requires the Firestore Emulator");
   }
   if (
     dojahHost === "sandbox.dojah.io" &&
     firebaseRequired &&
-    !firebaseProjectId.startsWith("demo-")
+    !firebaseProjectId.startsWith("demo-") &&
+    !hostedSandbox
   ) {
     throw new Error("Sandbox Firebase requires a demo project ID");
   }
