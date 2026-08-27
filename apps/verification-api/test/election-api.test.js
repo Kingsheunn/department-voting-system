@@ -27,8 +27,25 @@ async function startApi({ state = "Open", readinessError } = {}) {
     reviewer: { uid: "reviewer-one", verificationReviewer: true },
   };
   const identityTokens = {
-    verified: { uid: "voter-one", identityVerified: true },
-    unverified: { uid: "voter-two", identityVerified: false },
+    verified: {
+      uid: "voter-one",
+      identityVerified: true,
+      verificationEnvironment: "sandbox",
+    },
+    unverified: {
+      uid: "voter-two",
+      identityVerified: false,
+      verificationEnvironment: "sandbox",
+    },
+    wrongEnvironment: {
+      uid: "voter-three",
+      identityVerified: true,
+      verificationEnvironment: "production",
+    },
+    missingEnvironment: {
+      uid: "voter-four",
+      identityVerified: true,
+    },
   };
   const handler = createApiHandler({
     store,
@@ -173,6 +190,22 @@ test("returns only published public metadata to an identity-verified voter", asy
   assert.equal((await fetch(`${api.origin}/v1/election/current`, {
     headers: { authorization: "Bearer unverified" },
   })).status, 403);
+});
+
+test("rejects a verified voter token without the current provider environment", async (t) => {
+  const api = await startApi();
+  t.after(api.close);
+  await save(api, "admin", validConfiguration);
+
+  const wrongEnvironment = await fetch(`${api.origin}/v1/election/current`, {
+    headers: { authorization: "Bearer wrongEnvironment" },
+  });
+  const missingEnvironment = await fetch(`${api.origin}/v1/election/current`, {
+    headers: { authorization: "Bearer missingEnvironment" },
+  });
+
+  assert.equal(wrongEnvironment.status, 403);
+  assert.equal(missingEnvironment.status, 403);
 });
 
 test("returns live readiness only to an administrator", async (t) => {

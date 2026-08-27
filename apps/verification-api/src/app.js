@@ -158,7 +158,7 @@ async function authorizedStaff(request, firebaseAuth) {
   }
 }
 
-async function authorizedIdentity(request, firebaseAuth) {
+async function authorizedIdentity(request, firebaseAuth, providerEnvironment) {
   if (!firebaseAuth?.verifyIdentityToken) {
     throw new HttpError(503, "Voter authentication is unavailable");
   }
@@ -169,7 +169,12 @@ async function authorizedIdentity(request, firebaseAuth) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(401, "Unauthorized");
   }
-  if (identity.identityVerified !== true) throw new HttpError(403, "Forbidden");
+  if (
+    identity.identityVerified !== true ||
+    identity.verificationEnvironment !== providerEnvironment
+  ) {
+    throw new HttpError(403, "Forbidden");
+  }
   return identity;
 }
 
@@ -407,6 +412,7 @@ export function createApiHandler({
           firebaseCustomToken = await firebaseAuth.provisionAndMint({
             uid,
             email: attempt.email,
+            providerEnvironment,
           });
           await store.markAccountReady(attempt.id);
         } catch (error) {
@@ -473,7 +479,7 @@ export function createApiHandler({
         if (!electionConfigurationEnabled) {
           throw new HttpError(503, "Election configuration is disabled");
         }
-        await authorizedIdentity(request, firebaseAuth);
+        await authorizedIdentity(request, firebaseAuth, providerEnvironment);
         const configuration = publicElectionConfiguration(
           await store.getElectionConfiguration(),
         );
