@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/konsistent/konsistent.schema.json",
+  "version": "v1",
+  "conventions": [
+    {
+      "name": "retention-api-test-uses-production-boundary",
+      "description": "The retention API test imports the production API boundary.",
+      "severity": "error",
+      "paths": "test/retention-api.test.js",
+      "must": {
+        "importFrom": "../src/app.js"
+      }
+    },
+    {
+      "name": "retention-store-test-uses-production-boundary",
+      "description": "The retention store test imports the production Firestore boundary.",
+      "severity": "error",
+      "paths": "test/retention-store.test.js",
+      "must": {
+        "importFrom": "../src/firestore-store.js"
+      }
+    }
+  ]
+}

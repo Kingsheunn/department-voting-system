@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { fingerprintEmail, transitionStatus } from "./domain.js";
+import { auditDeleteAfter } from "./retention.js";
 
 function copy(value) {
   return value ? structuredClone(value) : null;
@@ -98,7 +99,7 @@ export function createMemoryStore({ now = () => new Date() } = {}) {
     }
 
     const updatedAt = now().toISOString();
-    const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+    const deleteAfter = auditDeleteAfter(updatedAt);
     Object.assign(attempt, {
       status,
       reviewStage,
@@ -136,7 +137,7 @@ export function createMemoryStore({ now = () => new Date() } = {}) {
       }
       const revision = currentRevision + 1;
       const updatedAt = now().toISOString();
-      const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+      const deleteAfter = auditDeleteAfter(updatedAt);
       const actorFingerprint = digest(actorUid);
       electionConfiguration = copy({
         ...configuration,

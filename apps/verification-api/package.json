@@ -15,5 +15,8 @@
   },
   "dependencies": {
     "firebase-admin": "14.2.0"
+  },
+  "devDependencies": {
+    "konsistent": "1.0.0-beta.4"
   }
 }

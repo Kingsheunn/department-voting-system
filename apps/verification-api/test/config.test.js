@@ -25,6 +25,58 @@ test("reads explicit runtime configuration without exposing secret values", () =
   assert.equal(config.accountProvisioningEnabled, false);
   assert.equal(config.firebase.required, false);
   assert.deepEqual(config.allowedOrigins, []);
+  assert.equal(config.retentionCleanupEnabled, false);
+});
+
+test("enables retention cleanup only with independent secrets and a matching service account", () => {
+  const production = {
+    ...validEnvironment,
+    NODE_ENV: "production",
+    STORE_DRIVER: "firestore",
+    FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+    HOSTED_SANDBOX_FIREBASE_PROJECT_ID: "voting-app-6e1fb",
+    PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED: "true",
+    EDGE_SHARED_SECRET: "e".repeat(32),
+    WEB_ALLOWED_ORIGINS: "https://voting-app-6e1fb.web.app",
+    RETENTION_CLEANUP_ENABLED: "true",
+    RETENTION_CLEANUP_SECRET: "r".repeat(32),
+    FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+      type: "service_account",
+      project_id: "voting-app-6e1fb",
+      client_email: "retention@voting-app-6e1fb.iam.gserviceaccount.com",
+      private_key: "-----BEGIN PRIVATE KEY-----\ntest-only\n-----END PRIVATE KEY-----\n",
+    }),
+  };
+
+  const config = readRuntimeConfig(production);
+  assert.equal(config.retentionCleanupEnabled, true);
+  assert.equal(config.retentionCleanupSecret, "r".repeat(32));
+  assert.equal(config.firebase.serviceAccount.project_id, "voting-app-6e1fb");
+
+  for (const overrides of [
+    { RETENTION_CLEANUP_SECRET: "" },
+    { RETENTION_CLEANUP_SECRET: "short" },
+    { RETENTION_CLEANUP_SECRET: "e".repeat(32) },
+    { FIREBASE_SERVICE_ACCOUNT_JSON: "" },
+    {
+      FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+        type: "service_account",
+        project_id: "wrong-project",
+        client_email: "retention@wrong-project.iam.gserviceaccount.com",
+        private_key: "-----BEGIN PRIVATE KEY-----\ntest-only\n-----END PRIVATE KEY-----\n",
+      }),
+    },
+    {
+      FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+        type: "service_account",
+        project_id: "voting-app-6e1fb",
+        client_email: "retention@another-project.iam.gserviceaccount.com",
+        private_key: "-----BEGIN PRIVATE KEY-----\ntest-only\n-----END PRIVATE KEY-----\n",
+      }),
+    },
+  ]) {
+    assert.throws(() => readRuntimeConfig({ ...production, ...overrides }), /retention|service account/i);
+  }
 });
 
 test("accepts exact HTTPS portal origins", () => {

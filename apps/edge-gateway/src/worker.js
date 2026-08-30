@@ -2,6 +2,15 @@ const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "OPTIONS"]);
 const ATTEMPT_PATH = "/v1/verification-attempts";
 const EDGE_AUTH_HEADER = "x-department-edge-auth";
 const EDGE_CLIENT_HEADER = "x-department-edge-client";
+const RETENTION_AUTH_HEADER = "x-department-retention-auth";
+const RETENTION_PATH = "/internal/retention-cleanup";
+const RETENTION_BODY_LIMIT = 4096;
+const RETENTION_COLLECTIONS = new Set([
+  "verificationAttempts",
+  "verificationReferences",
+  "verificationReviewAudits",
+  "electionConfigurationAudits",
+]);
 
 function corsHeaders(origin) {
   return origin
@@ -73,8 +82,76 @@ async function fingerprint(secret, clientAddress) {
   return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+async function partialFailureSignal(response) {
+  if (!response.body || !response.headers.get("content-type")?.includes("application/json")) {
+    if (response.body) await response.body.cancel();
+    return [];
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > RETENTION_BODY_LIMIT) return [];
+      chunks.push(value);
+    }
+    const body = JSON.parse(new TextDecoder().decode(
+      new Uint8Array(chunks.flatMap((chunk) => [...chunk])),
+    ));
+    if (body?.status !== "partial" || !Array.isArray(body.failedCollections)) return [];
+    return [...new Set(body.failedCollections.filter((name) =>
+      RETENTION_COLLECTIONS.has(name),
+    ))];
+  } catch {
+    return [];
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+
 export function createGateway({ fetchImpl = fetch } = {}) {
   return {
+    async scheduled(_controller, environment) {
+      const upstreamOrigin = configuredOrigin(environment.UPSTREAM_ORIGIN);
+      const sharedSecret = environment.ORIGIN_SHARED_SECRET;
+      const retentionSecret = environment.RETENTION_CLEANUP_SECRET;
+      if (
+        !upstreamOrigin ||
+        typeof sharedSecret !== "string" ||
+        sharedSecret.length < 32 ||
+        typeof retentionSecret !== "string" ||
+        retentionSecret.length < 32 ||
+        retentionSecret === sharedSecret
+      ) {
+        throw new Error("Retention cleanup configuration is unavailable");
+      }
+
+      let response;
+      try {
+        response = await fetchImpl(new Request(new URL(RETENTION_PATH, upstreamOrigin), {
+          method: "POST",
+          headers: {
+            [EDGE_AUTH_HEADER]: sharedSecret,
+            [RETENTION_AUTH_HEADER]: retentionSecret,
+          },
+          redirect: "manual",
+        }), { redirect: "manual" });
+      } catch {
+        throw new Error("Retention cleanup failed");
+      }
+      if (response.status !== 200) {
+        const failedCollections = await partialFailureSignal(response);
+        const suffix = failedCollections.length > 0
+          ? `: ${failedCollections.join(",")}`
+          : "";
+        throw new Error(`Retention cleanup failed${suffix}`);
+      }
+      if (response.body) await response.body.cancel();
+    },
+
     async fetch(request, environment) {
       const upstreamOrigin = configuredOrigin(environment.UPSTREAM_ORIGIN);
       const allowedPortalOrigins = configuredPortalOrigins(environment.ALLOWED_PORTAL_ORIGINS);

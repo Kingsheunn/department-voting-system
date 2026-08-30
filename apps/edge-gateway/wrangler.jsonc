@@ -9,7 +9,10 @@
     "ALLOWED_PORTAL_ORIGINS": "https://voting-app-6e1fb.web.app,https://voting-app-6e1fb-reviewer.web.app"
   },
   "secrets": {
-    "required": ["UPSTREAM_ORIGIN", "ORIGIN_SHARED_SECRET"]
+    "required": ["UPSTREAM_ORIGIN", "ORIGIN_SHARED_SECRET", "RETENTION_CLEANUP_SECRET"]
+  },
+  "triggers": {
+    "crons": ["17 * * * *"]
   },
   "ratelimits": [
     {

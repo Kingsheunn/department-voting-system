@@ -20,7 +20,10 @@ Required environment variable names:
 - `DOJAH_VERIFICATION_CONTRACT_CONFIRMED` (`true` only after a signed sandbox fixture confirms the contract)
 - `ACCOUNT_PROVISIONING_ENABLED` (defaults to `false`)
 - `ELECTION_CONFIGURATION_ENABLED` (defaults to `false`; requires Firestore and Firebase Auth)
+- `RETENTION_CLEANUP_ENABLED` (defaults to `false`; requires Firestore)
+- `RETENTION_CLEANUP_SECRET` (a distinct secret of at least 32 characters shared only with the scheduled Worker)
 - `FIREBASE_PROJECT_ID` when Firestore or account provisioning is enabled
+- `FIREBASE_SERVICE_ACCOUNT_JSON` for hosted retention cleanup; the service-account project must exactly match `FIREBASE_PROJECT_ID`
 - `HOSTED_SANDBOX_FIREBASE_PROJECT_ID` only for an approved hosted sandbox pilot; it must exactly match the non-demo `FIREBASE_PROJECT_ID` and must be removed before switching DoJah live
 - `FIREBASE_AUTH_EMULATOR_HOST` for sandbox account provisioning; omit the protocol
 - `PRODUCTION_INGRESS_RATE_LIMIT_CONFIRMED=true` after production ingress limiting is configured
@@ -67,6 +70,10 @@ uses only the process environment supplied by the deployment platform. Copy
 - `GET /v1/admin/election-readiness` (administrator claim required)
 - `GET /v1/election/current` (verified voter identity required)
 
+The non-public `POST /internal/retention-cleanup` maintenance route requires
+both the edge and retention secrets, rejects every browser `Origin`, and is not
+forwarded by the Worker's public `fetch` handler.
+
 Attempt status and exchange require the claim token returned at creation. The store retains only its SHA-256 hash, and the single-use credential expires after 24 hours. Firebase UID reservations are transactionally keyed by a normalized-email fingerprint so repeat verification for one email cannot create competing accounts. All responses use `Cache-Control: no-store`.
 
 Browser requests are accepted only from the exact origins in
@@ -112,8 +119,13 @@ spending quota. Its 5-per-minute address limit is an approximate Cloudflare
 location-level abuse control, not a strict global quota; shared campus networks
 can share that allowance.
 Attempts and reference-index records receive a Firestore-compatible
-`deleteAfter` date set 24 hours ahead. Enable Firestore TTL separately on that
-field for both collections; writing the field does not activate TTL deletion.
+`deleteAfter` date set 24 hours ahead. Because Firestore TTL deletion requires
+billing, the Spark deployment uses the scheduled Worker once per hour. Each run
+deletes at most 100 due records from each of the attempt, reference, verification
+review audit, and election configuration audit collections. Stable Firebase UID
+mappings and current election metadata are never cleanup targets. A partial run
+fails closed and is retried by the next schedule; cleanup can lag eligibility by
+up to one hour during normal operation and longer during provider outages.
 
 The API does not subscribe to a webhook service name because DoJah's current documentation uses conflicting spellings. Confirm the sandbox dashboard value before registration. A real signed sandbox webhook must become a regression fixture before production approval is enabled.
 
@@ -138,6 +150,6 @@ provider responses.
 
 Configuration saves use a Firestore transaction and expected revision to avoid
 lost updates. Sanitized configuration audits contain a one-way actor fingerprint
-and receive a `deleteAfter` timestamp 12 months ahead. Deploy the included
-Firestore TTL override for `electionConfigurationAudits`; writing `deleteAfter`
-alone does not enable deletion.
+and receive a `deleteAfter` timestamp 12 calendar months ahead. The same bounded
+scheduled cleanup removes due verification-review and election-configuration
+audit records.
