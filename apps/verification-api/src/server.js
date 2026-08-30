@@ -12,13 +12,19 @@ import { createMemoryStore } from "./memory-store.js";
 const config = readRuntimeConfig(process.env);
 let firebaseApp;
 if (config.firebase.required) {
-  const { applicationDefault, initializeApp } = await import("firebase-admin/app");
+  const { applicationDefault, cert, initializeApp } = await import("firebase-admin/app");
   const emulatorOnly = Boolean(
     config.firebase.authEmulatorHost || config.firebase.firestoreEmulatorHost,
   );
   firebaseApp = initializeApp({
     projectId: config.firebase.projectId,
-    ...(emulatorOnly ? {} : { credential: applicationDefault() }),
+    ...(emulatorOnly
+      ? {}
+      : {
+          credential: config.firebase.serviceAccount
+            ? cert(config.firebase.serviceAccount)
+            : applicationDefault(),
+        }),
   });
 }
 
@@ -67,6 +73,8 @@ const handler = createApiHandler({
   beleniosClient: createBeleniosClient(),
   allowedOrigins: config.allowedOrigins,
   edgeSharedSecret: config.edgeSharedSecret,
+  retentionCleanupEnabled: config.retentionCleanupEnabled,
+  retentionCleanupSecret: config.retentionCleanupSecret,
 });
 
 createServer(handler).listen(config.port, "0.0.0.0");

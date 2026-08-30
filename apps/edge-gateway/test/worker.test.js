@@ -4,12 +4,14 @@ import test from "node:test";
 import { createGateway } from "../src/worker.js";
 
 const SECRET = "s".repeat(32);
+const RETENTION_SECRET = "r".repeat(32);
 const VOTER_ORIGIN = "https://voting-app-6e1fb.web.app";
 
 function environment(overrides = {}) {
   return {
     UPSTREAM_ORIGIN: "https://department-voting-api.onrender.com",
     ORIGIN_SHARED_SECRET: SECRET,
+    RETENTION_CLEANUP_SECRET: RETENTION_SECRET,
     ALLOWED_PORTAL_ORIGINS: `${VOTER_ORIGIN},https://voting-app-6e1fb-reviewer.web.app`,
     ATTEMPT_RATE_LIMITER: { limit: async () => ({ success: true }) },
     ...overrides,
@@ -47,6 +49,93 @@ test("rate limits attempt creation by the Cloudflare client address", async () =
   assert.equal(response.headers.get("vary"), "Origin");
   assert.deepEqual(keys, ["203.0.113.9"]);
   assert.equal(upstreamCalls, 0);
+});
+
+test("public fetch cannot proxy the internal retention route", async () => {
+  let upstreamCalls = 0;
+  const response = await createGateway({
+    fetchImpl: async () => {
+      upstreamCalls += 1;
+      return new Response("unexpected");
+    },
+  }).fetch(new Request("https://gateway.example/internal/retention-cleanup", {
+    method: "POST",
+  }), environment());
+
+  assert.equal(response.status, 404);
+  assert.equal(upstreamCalls, 0);
+});
+
+test("scheduled retention cleanup sends the exact protected request", async () => {
+  let forwarded;
+  const handler = createGateway({
+    fetchImpl: async (request, options) => {
+      forwarded = { request, options };
+      return new Response(JSON.stringify({
+        status: "complete",
+        deletedTotal: 0,
+        deletedByCollection: {
+          verificationAttempts: 0,
+          verificationReferences: 0,
+          verificationReviewAudits: 0,
+          electionConfigurationAudits: 0,
+        },
+        hasMore: false,
+        failedCollections: [],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  await handler.scheduled({}, environment());
+
+  assert.equal(
+    forwarded.request.url,
+    "https://department-voting-api.onrender.com/internal/retention-cleanup",
+  );
+  assert.equal(forwarded.request.method, "POST");
+  assert.equal(forwarded.request.headers.get("origin"), null);
+  assert.equal(forwarded.request.headers.get("x-department-edge-auth"), SECRET);
+  assert.equal(
+    forwarded.request.headers.get("x-department-retention-auth"),
+    RETENTION_SECRET,
+  );
+  assert.deepEqual(forwarded.options, { redirect: "manual" });
+});
+
+test("scheduled retention cleanup fails closed on unsafe configuration or upstream failure", async () => {
+  const handler = createGateway({
+    fetchImpl: async () => new Response("unavailable", { status: 503 }),
+  });
+
+  await assert.rejects(handler.scheduled({}, environment({
+    RETENTION_CLEANUP_SECRET: "short",
+  })), /configuration/i);
+  await assert.rejects(handler.scheduled({}, environment({
+    RETENTION_CLEANUP_SECRET: SECRET,
+  })), /configuration/i);
+  await assert.rejects(handler.scheduled({}, environment()), /failed/i);
+});
+
+test("scheduled retention cleanup exposes only allowlisted partial-failure signals", async () => {
+  const handler = createGateway({
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "partial",
+      failedCollections: ["verificationAttempts"],
+      error: "student@example.edu secret-value provider-reference",
+    }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    }),
+  });
+
+  await assert.rejects(
+    handler.scheduled({}, environment()),
+    (error) => {
+      assert.match(error.message, /verificationAttempts/);
+      assert.doesNotMatch(error.message, /student@example|secret-value|provider-reference/);
+      return true;
+    },
+  );
 });
 
 test("fails closed when Cloudflare does not provide a client address", async () => {

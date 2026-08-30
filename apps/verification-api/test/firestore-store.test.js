@@ -322,3 +322,39 @@ test("Firestore atomically revisions election configuration with a sanitized aud
     (error) => error.code === "REVISION_CONFLICT",
   );
 });
+
+
+test("Firestore audit retention advances by twelve calendar months across a leap year", async () => {
+  const firestore = createFakeFirestore();
+  const store = createFirestoreStore(firestore, {
+    now: () => new Date("2023-03-01T10:00:00.000Z"),
+  });
+  await store.saveElectionConfiguration({
+    configuration: { title: "Calendar retention" },
+    expectedRevision: 0,
+    actorUid: "admin",
+  });
+  await store.createAttempt({
+    id: "va_calendar_review",
+    email: "student@students.unilorin.edu.ng",
+    referenceId: "VR_calendar_review",
+    status: "pending_review",
+    statusReason: "student_id_manual_review_required",
+    accountStatus: "not_created",
+    createdAt: "2023-03-01T09:00:00.000Z",
+    expiresAt: "2099-03-01T09:00:00.000Z",
+    deleteAfter: new Date("2099-03-01T09:00:00.000Z"),
+  });
+  await store.recordReviewerDecision({
+    id: "va_calendar_review",
+    actorUid: "reviewer",
+    decision: "approve",
+    idempotencyKey: "calendar-review",
+  });
+
+  const electionAudit = firestore.records.get("electionConfigurationAudits/revision-1");
+  const reviewAudit = [...firestore.records.entries()]
+    .find(([path]) => path.startsWith("verificationReviewAudits/"))[1];
+  assert.equal(electionAudit.deleteAfter.toISOString(), "2024-03-01T10:00:00.000Z");
+  assert.equal(reviewAudit.deleteAfter.toISOString(), "2024-03-01T10:00:00.000Z");
+});

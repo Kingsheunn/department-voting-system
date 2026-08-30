@@ -26,6 +26,8 @@ const CORS_HEADER_SET = new Set(CORS_HEADERS.split(", "));
 const CORS_METHOD_SET = new Set(CORS_METHODS.split(", "));
 const EDGE_AUTH_HEADER = "x-department-edge-auth";
 const EDGE_CLIENT_HEADER = "x-department-edge-client";
+const RETENTION_AUTH_HEADER = "x-department-retention-auth";
+const RETENTION_LIMIT = 100;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -130,12 +132,16 @@ function applyCors(request, response, allowedOrigins) {
   return true;
 }
 
-function edgeSecretMatches(request, expectedSecret) {
-  const actualSecret = request.headers?.[EDGE_AUTH_HEADER];
+function secretMatches(request, header, expectedSecret) {
+  const actualSecret = request.headers?.[header];
   if (typeof actualSecret !== "string") return false;
   const actual = Buffer.from(actualSecret);
   const expected = Buffer.from(expectedSecret);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function edgeSecretMatches(request, expectedSecret) {
+  return secretMatches(request, EDGE_AUTH_HEADER, expectedSecret);
 }
 
 function bearerToken(request) {
@@ -275,6 +281,8 @@ export function createApiHandler({
   beleniosClient,
   allowedOrigins = [],
   edgeSharedSecret,
+  retentionCleanupEnabled = false,
+  retentionCleanupSecret,
 }) {
   if (
     !store ||
@@ -288,7 +296,13 @@ export function createApiHandler({
         !firebaseAuth?.verifyIdentityToken ||
         !store.getElectionConfiguration ||
         !store.saveElectionConfiguration ||
-        !beleniosClient?.getElectionReadiness))
+        !beleniosClient?.getElectionReadiness)) ||
+    (retentionCleanupEnabled &&
+      (!store.cleanupExpired ||
+        typeof edgeSharedSecret !== "string" ||
+        typeof retentionCleanupSecret !== "string" ||
+        retentionCleanupSecret.length < 32 ||
+        retentionCleanupSecret === edgeSharedSecret))
   ) {
     throw new Error("Verification API dependencies are incomplete");
   }
@@ -324,6 +338,19 @@ export function createApiHandler({
       const publicHealthCheck = request.method === "GET" && url.pathname === "/healthz";
       if (edgeSharedSecret && !publicHealthCheck && !edgeSecretMatches(request, edgeSharedSecret)) {
         throw new HttpError(403, "Edge authorization is required");
+      }
+      if (url.pathname === "/internal/retention-cleanup") {
+        if (!retentionCleanupEnabled || request.method !== "POST") {
+          return sendJson(response, 404, { error: "Not found" });
+        }
+        if (
+          request.headers?.origin ||
+          !secretMatches(request, RETENTION_AUTH_HEADER, retentionCleanupSecret)
+        ) {
+          throw new HttpError(403, "Retention authorization is required");
+        }
+        const result = await store.cleanupExpired({ cutoff: now(), limit: RETENTION_LIMIT });
+        return sendJson(response, result.status === "complete" ? 200 : 503, result);
       }
       if (applyCors(request, response, allowedOriginSet)) {
         return sendJson(response, 204);

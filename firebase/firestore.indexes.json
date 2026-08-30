@@ -9,30 +9,5 @@
       ]
     }
   ],
-  "fieldOverrides": [
-    {
-      "collectionGroup": "verificationAttempts",
-      "fieldPath": "deleteAfter",
-      "ttl": true,
-      "indexes": []
-    },
-    {
-      "collectionGroup": "verificationReferences",
-      "fieldPath": "deleteAfter",
-      "ttl": true,
-      "indexes": []
-    },
-    {
-      "collectionGroup": "verificationReviewAudits",
-      "fieldPath": "deleteAfter",
-      "ttl": true,
-      "indexes": []
-    },
-    {
-      "collectionGroup": "electionConfigurationAudits",
-      "fieldPath": "deleteAfter",
-      "ttl": true,
-      "indexes": []
-    }
-  ]
+  "fieldOverrides": []
 }

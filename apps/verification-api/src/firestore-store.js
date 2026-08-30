@@ -1,6 +1,23 @@
 import { createHash } from "node:crypto";
 
 import { fingerprintEmail, transitionStatus } from "./domain.js";
+import { auditDeleteAfter } from "./retention.js";
+
+const RETENTION_COLLECTIONS = [
+  "verificationAttempts",
+  "verificationReferences",
+  "verificationReviewAudits",
+  "electionConfigurationAudits",
+];
+
+function storedDate(value) {
+  const date = value instanceof Date
+    ? value
+    : typeof value?.toDate === "function"
+      ? value.toDate()
+      : null;
+  return date instanceof Date && Number.isFinite(date.getTime()) ? date : null;
+}
 
 function dataOrNull(snapshot) {
   return snapshot.exists ? snapshot.data() : null;
@@ -104,7 +121,7 @@ export function createFirestoreStore(firestore, { now = () => new Date() } = {})
       }
 
       const updatedAt = now().toISOString();
-      const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+      const deleteAfter = auditDeleteAfter(updatedAt);
       const response = { status, reviewStage };
       transaction.update(attemptRef, {
         status,
@@ -130,6 +147,57 @@ export function createFirestoreStore(firestore, { now = () => new Date() } = {})
   }
 
   return {
+    async cleanupExpired({ cutoff, limit }) {
+      if (
+        !(cutoff instanceof Date) ||
+        !Number.isFinite(cutoff.getTime()) ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 100
+      ) {
+        throw new Error("Retention cleanup policy is invalid");
+      }
+      const deletedByCollection = Object.fromEntries(
+        RETENTION_COLLECTIONS.map((name) => [name, 0]),
+      );
+      const failedCollections = [];
+      let hasMore = false;
+
+      for (const name of RETENTION_COLLECTIONS) {
+        try {
+          const snapshot = await firestore.collection(name)
+            .where("deleteAfter", "<=", cutoff)
+            .orderBy("deleteAfter", "asc")
+            .limit(limit + 1)
+            .get();
+          const due = snapshot.docs
+            .slice(0, limit)
+            .filter((document) => {
+              const deleteAfter = storedDate(document.data()?.deleteAfter);
+              return deleteAfter && deleteAfter <= cutoff;
+            });
+          hasMore ||= snapshot.docs.length > limit;
+          if (due.length > 0) {
+            const batch = firestore.batch();
+            for (const document of due) batch.delete(document.ref);
+            await batch.commit();
+          }
+          deletedByCollection[name] = due.length;
+        } catch {
+          failedCollections.push(name);
+        }
+      }
+
+      return {
+        status: failedCollections.length === 0 ? "complete" : "partial",
+        deletedTotal: Object.values(deletedByCollection)
+          .reduce((total, count) => total + count, 0),
+        deletedByCollection,
+        hasMore,
+        failedCollections,
+      };
+    },
+
     async getElectionConfiguration() {
       const configuration = dataOrNull(await electionMetadata.doc("current").get());
       if (!configuration) return null;
@@ -148,7 +216,7 @@ export function createFirestoreStore(firestore, { now = () => new Date() } = {})
         }
         const revision = currentRevision + 1;
         const updatedAt = now().toISOString();
-        const deleteAfter = new Date(Date.parse(updatedAt) + 365 * 24 * 60 * 60 * 1000);
+        const deleteAfter = auditDeleteAfter(updatedAt);
         const actorFingerprint = digest(actorUid);
         const stored = {
           ...configuration,

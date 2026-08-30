@@ -15,6 +15,28 @@ function booleanFlag(environment, name) {
   return value === "true";
 }
 
+function serviceAccount(environment, projectId) {
+  const raw = environment.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!raw) return undefined;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("Firebase service account JSON is invalid");
+  }
+  if (
+    value?.type !== "service_account" ||
+    value.project_id !== projectId ||
+    typeof value.client_email !== "string" ||
+    !value.client_email.endsWith(`@${projectId}.iam.gserviceaccount.com`) ||
+    typeof value.private_key !== "string" ||
+    !value.private_key.includes("-----BEGIN PRIVATE KEY-----")
+  ) {
+    throw new Error("Firebase service account does not match the configured project");
+  }
+  return value;
+}
+
 function dojahHostname(baseUrl) {
   let url;
   try {
@@ -126,6 +148,26 @@ export function readRuntimeConfig(environment) {
   if (nodeEnvironment === "production" && !edgeSharedSecret) {
     throw new Error("Production requires an edge shared secret");
   }
+  const retentionCleanupEnabled = booleanFlag(
+    environment,
+    "RETENTION_CLEANUP_ENABLED",
+  );
+  const retentionCleanupSecret = environment.RETENTION_CLEANUP_SECRET;
+  if (retentionCleanupEnabled) {
+    if (storeDriver !== "firestore") {
+      throw new Error("Retention cleanup requires Firestore");
+    }
+    if (!edgeSharedSecret) {
+      throw new Error("Retention cleanup requires an edge shared secret");
+    }
+    if (
+      typeof retentionCleanupSecret !== "string" ||
+      retentionCleanupSecret.length < 32 ||
+      retentionCleanupSecret === edgeSharedSecret
+    ) {
+      throw new Error("Retention cleanup requires an independent 32-character secret");
+    }
+  }
   if (nodeEnvironment === "production" && storeDriver === "memory") {
     throw new Error("The memory store is not permitted in production");
   }
@@ -165,7 +207,8 @@ export function readRuntimeConfig(environment) {
     storeDriver === "firestore" ||
     accountProvisioningEnabled ||
     manualReviewEnabled ||
-    electionConfigurationEnabled;
+    electionConfigurationEnabled ||
+    retentionCleanupEnabled;
   const firebaseProjectId = firebaseRequired
     ? required(environment, "FIREBASE_PROJECT_ID")
     : environment.FIREBASE_PROJECT_ID;
@@ -226,6 +269,12 @@ export function readRuntimeConfig(environment) {
   ) {
     throw new Error("Sandbox Firebase requires a demo project ID");
   }
+  const firebaseServiceAccount = firebaseRequired
+    ? serviceAccount(environment, firebaseProjectId)
+    : undefined;
+  if (retentionCleanupEnabled && !firestoreEmulatorHost && !firebaseServiceAccount) {
+    throw new Error("Retention cleanup requires a Firebase service account");
+  }
   const privateKey = required(environment, "DOJAH_PRIVATE_KEY");
   const imageHosts = (environment.DOJAH_IMAGE_HOSTS ?? "images.dojah.io")
     .split(",")
@@ -245,12 +294,15 @@ export function readRuntimeConfig(environment) {
     accountProvisioningEnabled,
     manualReviewEnabled,
     electionConfigurationEnabled,
+    retentionCleanupEnabled,
+    retentionCleanupSecret,
     edgeSharedSecret,
     firebase: {
       required: firebaseRequired,
       projectId: firebaseProjectId,
       authEmulatorHost,
       firestoreEmulatorHost,
+      serviceAccount: firebaseServiceAccount,
     },
     dojah: {
       appId: required(environment, "DOJAH_APP_ID"),
